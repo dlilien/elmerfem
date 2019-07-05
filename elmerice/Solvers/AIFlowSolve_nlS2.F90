@@ -74,7 +74,7 @@
      INTEGER :: i, j, k, l, n, t, iter, NDeg, STDOFs, LocalNodes, istat
      INTEGER :: dim, comp 
 
-     TYPE(ValueList_t),POINTER :: Material, BC, BodyForce
+     TYPE(ValueList_t),POINTER :: Material, BC, BodyForce, SolverParams
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement
 
@@ -143,7 +143,7 @@
      REAL(KIND=dp) :: Bu, Bv, Bw, RM(3,3)
      REAL(KIND=dp), POINTER :: BoundaryNormals(:,:), &
          BoundaryTangent1(:,:), BoundaryTangent2(:,:)
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile
+     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar
      REAL(KIND=dp) :: Radius
 
 #ifdef USE_ISO_C_BINDINGS
@@ -189,11 +189,18 @@
       LocalNodes = COUNT( AIFlowPerm > 0 )
       IF ( LocalNodes <= 0 ) RETURN
 
-      TempSol => VariableGet( Solver % Mesh % Variables, 'Temperature' )
+      SolverParams => GetSolverParams()
+      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal )
+      IF (.NOT.GotIt) THEN
+          TempVar = 'Temperature'
+      END IF
+      TempSol => VariableGet( Solver % Mesh % Variables, TempVar )
       IF ( ASSOCIATED( TempSol) ) THEN
         TempPerm    => TempSol % Perm
         Temperature => TempSol % Values
       END IF
+      WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
+      CALL INFO('AIFlowSolve', Message , level = 20)
 
       FabricVariable => VariableGet(Solver % Mesh % Variables, 'Fabric')
       IF ( ASSOCIATED( FabricVariable ) ) THEN
