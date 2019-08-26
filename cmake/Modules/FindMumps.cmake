@@ -18,6 +18,7 @@ SET(MUMPSINCLUDE
   "${MUMPS_ROOT}/include"
   "$ENV{MUMPS_ROOT}/include"
   "${CMAKE_SOURCE_DIR}/mumps/include"
+  "/usr/include/MUMPS"
   INTERNAL
   )
 # Try to find Mumps
@@ -33,6 +34,8 @@ SET(MUMPSLIB
   "${MUMPS_ROOT}/lib"
   "$ENV{MUMPS_ROOT}/lib"
   "${CMAKE_SOURCE_DIR}/mumps/lib"
+  "/usr/lib64/openmpi/lib"
+  "/usr/lib64/lib"
   INTERNAL)
 
 FIND_LIBRARY(MUMPS_D_LIB dmumps HINTS ${MUMPSLIB})

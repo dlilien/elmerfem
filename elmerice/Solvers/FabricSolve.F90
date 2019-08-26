@@ -600,7 +600,7 @@
 !------------------------------------------------------------------------------
 
       Unorm = DefaultSolve()
-!      CurrFabric( Component::5 ) = Solver % Variable % Values
+      CurrFabric( Component::5 ) = Solver % Variable % Values
       WRITE(Message,*) 'solve done', minval( solver % variable % values), maxval( Solver % variable % values)
       CALL Info( 'FabricSolve', Message, Level=4 )
       
