@@ -73,7 +73,7 @@
 
      INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat
 
-     TYPE(ValueList_t),POINTER :: Material, BC
+     TYPE(ValueList_t),POINTER :: Material, BC, SolverParams
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement, Element, &
               ParentElement, LeftParent, RightParent, Edge
@@ -122,7 +122,7 @@
           E1, E2, E3, Wn,  FabricGrid, rho, lambda, Velocity, &
           MeshVelocity, old_body, dim, comp
 !------------------------------------------------------------------------------
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile
+     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar
 
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
@@ -162,11 +162,18 @@
       FabricPerm   => FabricSol % Perm
       FabricValues => FabricSol % Values
 
-      TempSol => VariableGet( Solver % Mesh % Variables, 'Temperature' )
-      IF ( ASSOCIATED( TempSol) ) THEN
-       TempPerm    => TempSol % Perm
-       Temperature => TempSol % Values
+      SolverParams => GetSolverParams()
+      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal=.FALSE. )
+      IF (.NOT.GotIt) THEN
+          TempVar = 'Temperature'
       END IF
+      TempSol => VariableGet( Solver % Mesh % Variables, TempVar )
+      IF ( ASSOCIATED( TempSol) ) THEN
+        TempPerm    => TempSol % Perm
+        Temperature => TempSol % Values
+      END IF
+      WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
+      CALL INFO('FabricSolve', Message , level = 20)
 
       FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
       IF ( ASSOCIATED( FlowVariable ) ) THEN
