@@ -73,7 +73,7 @@
 
      INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat
 
-     TYPE(ValueList_t),POINTER :: Material, BC
+     TYPE(ValueList_t),POINTER :: Material, BC, SolverParams
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement, Element, &
               ParentElement, LeftParent, RightParent, Edge
@@ -122,7 +122,7 @@
           E1, E2, E3, Wn,  FabricGrid, rho, lambda, Velocity, &
           MeshVelocity, old_body, dim, comp
 !------------------------------------------------------------------------------
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile
+     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar
 
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
@@ -162,11 +162,18 @@
       FabricPerm   => FabricSol % Perm
       FabricValues => FabricSol % Values
 
-      TempSol => VariableGet( Solver % Mesh % Variables, 'Temperature' )
-      IF ( ASSOCIATED( TempSol) ) THEN
-       TempPerm    => TempSol % Perm
-       Temperature => TempSol % Values
+      SolverParams => GetSolverParams()
+      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal=.FALSE. )
+      IF (.NOT.GotIt) THEN
+          TempVar = 'Temperature'
       END IF
+      TempSol => VariableGet( Solver % Mesh % Variables, TempVar )
+      IF ( ASSOCIATED( TempSol) ) THEN
+        TempPerm    => TempSol % Perm
+        Temperature => TempSol % Values
+      END IF
+      WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
+      CALL INFO('FabricSolve', Message , level = 20)
 
       FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
       IF ( ASSOCIATED( FlowVariable ) ) THEN
@@ -215,7 +222,7 @@
                  STIFF( 2*STDOFs*N,2*STDOFs*N ),  &
                  LOAD( 4,N ), Alpha( 3,N ), Beta( N ), &
                  CurrFabric( 5*SIZE(Solver % Variable % Values)), &
-                 TempFabVal( 5*SIZE(Solver % Variable % Values)), &
+                 TempFabVal( SIZE(FabricValues)), &
                  STAT=istat )
 
 
@@ -474,6 +481,7 @@
 
       END IF
 
+      CALL DefaultFinishBulkAssembly()
 !------------------------------------------------------------------------------
 !     Loop over the boundary elements
 !------------------------------------------------------------------------------
@@ -815,6 +823,7 @@ CONTAINS
       END INTERFACE
 !------------------------------------------------------------------------------
       Fond=.False.
+      
       hmax = maxval (Nodes % y(1:n))
         
      dim = CoordinateSystemDimension()
@@ -875,7 +884,7 @@ CONTAINS
 !     function of the Temperature )
 !     -----------------------------------------------------
       Theta = 1._dp / ( FabricGrid(5) + FabricGrid(6) )
-      Theta = Theta 
+      !Theta = Theta 
 
 !      Strain-Rate, Stresses and Spin
 
@@ -909,7 +918,7 @@ CONTAINS
 !    Compute strainRate and Spin :
 !    -----------------------------
 
-      LGrad = MATMUL( NodalVelo(:,1:n), dBasisdx(1:n,:) )
+      LGrad = MATMUL( NodalVelo(1:3,1:n), dBasisdx(1:n,1:3) )
 
       StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
 
@@ -991,7 +1000,6 @@ CONTAINS
       CASE(1)
         !C0 = -2._dp*(SD(1)-SD(3))
         C0=-2._dp*SD(1)-3._dp*lambda*Deq
-
       CASE(2)
         !C0 = -2._dp*(SD(2)-SD(3))
         C0 = -2._dp*SD(2)-3._dp*lambda*Deq
