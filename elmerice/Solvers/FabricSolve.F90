@@ -415,7 +415,7 @@
 
          k = FlowVariable % DOFs
          Velocity = 0.0d0
-         DO i=1,k
+         DO i=1,k-1
             Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
          END DO
 
