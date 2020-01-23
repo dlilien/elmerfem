@@ -1019,7 +1019,19 @@ CONTAINS
         END DO
 
       END IF
-      
+
+
+      ! If we are adding in manual spins, do it here before the stress
+      ! calculations
+      IF ( PRESENT(LocalOOP23) ) THEN
+          StrainRate(2, 3) = SUM( LocalOOP23(1:n) * Basis(1:n) )
+          StrainRate(3, 2) = StrainRate(2, 3)
+      END IF
+      IF ( PRESENT(LocalOOP13) ) THEN
+          StrainRate(3, 1) = SUM( LocalOOP13(1:n) * Basis(1:n) )
+          StrainRate(1, 3) = StrainRate(3, 1)
+      END IF
+
 !
 !    Compute deviatoric stresses: 
 !    ----------------------------
