@@ -352,7 +352,7 @@
 
        PrevUNorm = UNorm
        
-       DO COMP=1,2*dim-1
+       DO COMP=1,2*spoofdim-1
 
        Solver % Variable % Values = CurrFabric( COMP::5 )
        IF ( TransientSimulation ) THEN
@@ -692,7 +692,7 @@
          RelativeChange = 2.0d0 * ABS( PrevUNorm - UNorm) / ( PrevUnorm + UNorm)
       ELSE
          RelativeChange = 0.0d0
-      END IF
+     END IF
 
       WRITE( Message, * ) 'Result Norm   : ',UNorm
       CALL Info( 'FabricSolve', Message, Level=4 )
@@ -1032,8 +1032,8 @@ CONTAINS
       
       INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
       INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
-      DO k = 1, 2*dim
-       DO j = 1, 2*dim
+      DO k = 1, 2*spoofdim
+       DO j = 1, 2*spoofdim
         Stress( INDi(k),INDj(k) ) = &
         Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
        END DO
@@ -1044,11 +1044,11 @@ CONTAINS
 !     SD=(1-r)D + r psi/2 S :
 !     -----------------------
       SD=0._dp
-      DO i=1,2*dim
+      DO i=1,2*spoofdim
         SD(i)= (1._dp - rho)*StrainRate(INDi(i),INDj(i)) + rho *&
                                    Theta *  Stress(INDi(i),INDj(i))
       END DO
-      Do i=1,2*dim-3
+      DO i=1,2*spoofdim-3
         Spin(i)=Spin1(INDi(i+3),INDj(i+3))
       End do
 
@@ -1058,7 +1058,7 @@ CONTAINS
 !     Velocity :
 !     ----------
       Velo = 0.0d0
-      DO i=1,dim
+      DO i=1,spoofdim
          Velo(i) = SUM( Basis(1:n) * (NodalVelo(i,1:n) - NodMeshVel(i,1:n)) )
       END DO
       Unorm = SQRT( SUM( Velo**2._dp ) )
@@ -1103,7 +1103,7 @@ CONTAINS
             !
             ! Advection terms:
             ! ----------------
-            DO j=1,dim
+            DO j=1,spoofdim
                A = A - Velo(j) * Basis(q) * dBasisdx(p,j)
             END DO
 
@@ -1284,7 +1284,7 @@ CONTAINS
         Average(n1+1:n1+n2) = RightBasis(1:n2) / 2
 
         cu = 0.0d0
-        DO i=1,dim
+        DO i=1,spoofdim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * EdgeBasis(1:n) )
         END DO
         Udotn = SUM( Normal * cu )
@@ -1350,7 +1350,7 @@ CONTAINS
                Basis, dBasisdx, ddBasisddx, .FALSE. )
        S = S * detJ
        cu = 0.0d0
-       DO i=1,dim
+       DO i=1,spoofdim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
        END DO
        UdotnA = UdotnA + s*SUM( Normal * cu )
@@ -1377,7 +1377,7 @@ CONTAINS
 
        L = SUM( LOAD(1:n) * Basis(1:n) )
        cu = 0.0d0
-       DO i=1,dim
+       DO i=1,spoofdim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
        END DO
        Udotn = SUM( Normal * cu )
