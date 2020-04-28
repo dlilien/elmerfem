@@ -733,7 +733,7 @@
             a2(5)=E2(i)
             a2(6)=E3(i)
 
-            call R2Ro(a2,dim,ai,angle)
+            call R2Ro(a2,spoofdim,ai,angle)
 
             angle(:)=angle(:)*rad2deg
             If (angle(1).gt.90._dp) angle(1)=angle(1)-180._dp
@@ -979,7 +979,7 @@ CONTAINS
       
 !     A2 expressed in the orthotropic frame
 !
-      call R2Ro(ai,dim,ap,angle)
+      call R2Ro(ai,spoofdim,ap,angle)
 
 !     Get viscosity
 
@@ -1014,7 +1014,7 @@ CONTAINS
 
       ELSE
         epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
-        DO i=1,dim 
+        DO i=1,spoofdim 
           StrainRate(i,i) = StrainRate(i,i) - epsi/dim
         END DO
 
@@ -1137,7 +1137,7 @@ CONTAINS
           SD(1)*a4(1) + SD(2)*a4(3) - SD(3)*(-A1+a4(1)+a4(3)) ) + & 
                       lambda*Deq
 
-          IF(dim == 3) THEN
+          IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( -Spin(3)*E3 + &
             SD(6)*(2._dp*a4(6)-E3) + 2._dp*SD(5)*a4(4) )
           END IF
@@ -1148,7 +1148,7 @@ CONTAINS
           SD(2)*a4(2) + SD(1)*a4(3) - SD(3)*(-A2+a4(2)+a4(3)) )  +  &
                         lambda*Deq
           
-          IF(dim == 3) THEN
+          IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( Spin(2)*E2 + &
             SD(5)*(2._dp*a4(8)-E2) + 2._dp*SD(6)*a4(5) )
           END IF
@@ -1158,7 +1158,7 @@ CONTAINS
           LoadAtIp = Spin(1)*(A2-A1)  +  SD(4)*(4._dp*a4(3)-A1-A2) + &
           2._dp* ( SD(1)*a4(7) + SD(2)*a4(9) - SD(3)*(-E1+a4(7)+a4(9)) )
           
-          IF(dim == 3) THEN
+          IF(spoofdim == 3) THEN
            LoadAtIp =  LoadAtIp - Spin(3)*E2 + Spin(2)*E3  &
            + SD(6)*(4._dp*a4(4)-E2) + SD(5)*(4._dp*a4(5)-E3)  
           END IF
@@ -1296,7 +1296,7 @@ CONTAINS
         Average(n1+1:n1+n2) = RightBasis(1:n2) / 2
 
         cu = 0.0d0
-        DO i=1,spoofdim
+        DO i=1,dim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * EdgeBasis(1:n) )
         END DO
         Udotn = SUM( Normal * cu )
@@ -1362,7 +1362,7 @@ CONTAINS
                Basis, dBasisdx, ddBasisddx, .FALSE. )
        S = S * detJ
        cu = 0.0d0
-       DO i=1,spoofdim
+       DO i=1,dim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
        END DO
        UdotnA = UdotnA + s*SUM( Normal * cu )
@@ -1389,7 +1389,7 @@ CONTAINS
 
        L = SUM( LOAD(1:n) * Basis(1:n) )
        cu = 0.0d0
-       DO i=1,spoofdim
+       DO i=1,dim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
        END DO
        Udotn = SUM( Normal * cu )
