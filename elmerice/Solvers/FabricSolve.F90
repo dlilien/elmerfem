@@ -1064,8 +1064,9 @@ CONTAINS
         Spin(i)=Spin1(INDi(i+3),INDj(i+3))
       End do
 
-      Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
-                            (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
+!       Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
+!                             (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
+      Deq = EXP(LOG(10.0_dp) * sum(NodalTemperature(1:n) * Basis(1:n)) / 10.0_dp)
 !
 !     Velocity :
 !     ----------
