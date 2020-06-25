@@ -143,10 +143,10 @@
 #endif
 !------------------------------------------------------------------------------
       INTERFACE
-        Subroutine R2Ro(a2,dim,ai,angle)
+        Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
         USE Types
         REAL(KIND=dp),intent(in) :: a2(6)
-        Integer :: dim
+        Integer :: dim, spoofdim
         REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
        End Subroutine R2Ro
       End Interface                                                       
@@ -733,7 +733,7 @@
             a2(5)=E2(i)
             a2(6)=E3(i)
 
-            call R2Ro(a2,spoofdim,ai,angle)
+            call R2Ro(a2,dim,spoofdim,ai,angle)
 
             angle(:)=angle(:)*rad2deg
             If (angle(1).gt.90._dp) angle(1)=angle(1)-180._dp
@@ -868,10 +868,10 @@ CONTAINS
            REAL(KIND=dp),intent(out) :: a4(9)
         END SUBROUTINE
 
-        Subroutine R2Ro(ai,dim,a2,angle)
+        Subroutine R2Ro(ai,dim,spoofdim,a2,angle)
          USE Types
          REAL(KIND=dp),intent(in) :: ai(6)
-         Integer :: dim
+         Integer :: dim, spoofdim
          REAL(KIND=dp),intent(out) :: a2(3), Angle(3)
         End Subroutine R2Ro
 
@@ -979,7 +979,7 @@ CONTAINS
       
 !     A2 expressed in the orthotropic frame
 !
-      call R2Ro(ai,spoofdim,ap,angle)
+      call R2Ro(ai,dim,spoofdim,ap,angle)
 
 !     Get viscosity
 
@@ -1064,9 +1064,9 @@ CONTAINS
         Spin(i)=Spin1(INDi(i+3),INDj(i+3))
       End do
 
-!       Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
-!                             (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
-      Deq = EXP(LOG(10.0_dp) * sum(NodalTemperature(1:n) * Basis(1:n)) / 10.0_dp)
+      Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
+                             (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
+      Deq=Deq * EXP(LOG(10.0_dp) * sum(NodalTemperature(1:n) * Basis(1:n)) / 10.0_dp)
 !
 !     Velocity :
 !     ----------
