@@ -1014,7 +1014,7 @@ CONTAINS
 
       ELSE
         epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
-        DO i=1,spoofdim 
+        DO i=1,dim 
           StrainRate(i,i) = StrainRate(i,i) - epsi/dim
         END DO
 
