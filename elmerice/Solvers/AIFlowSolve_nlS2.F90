@@ -865,10 +865,10 @@ CONTAINS
      LOGICAL :: stat
 
      INTERFACE
-      Subroutine R2Ro(a2,dim,ai,angle)
+      Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
          USE Types
          REAL(KIND=dp),intent(in) :: a2(6)
-         Integer :: dim
+         Integer :: dim,spoofdim
          REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
       End Subroutine R2Ro
                  
@@ -941,7 +941,7 @@ CONTAINS
          a2(5) = SUM( NodalEuler2(1:n) * Basis(1:n) )
          a2(6) = SUM( NodalEuler3(1:n) * Basis(1:n) )
       
-         CALL R2Ro(a2,dim,ai,angle)
+         CALL R2Ro(a2,dim,dim,ai,angle)
          CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
 ! else use isotropic law
       ELSE
@@ -1321,10 +1321,10 @@ CONTAINS
      Real(kind=dp) :: Bg, BGlenT, ss, nn
 !------------------------------------------------------------------------------
      INTERFACE
-      Subroutine R2Ro(a2,dim,ai,angle)
+      Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
          USE Types
          REAL(KIND=dp),intent(in) :: a2(6)
-         Integer :: dim
+         Integer :: dim,spoofdim
          REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
       End Subroutine R2Ro
                  
@@ -1404,7 +1404,7 @@ CONTAINS
         a2(5) = SUM( NodalE2(1:n) * Basis(1:n) )
         a2(6) = SUM( NodalE3(1:n) * Basis(1:n) )
       
-        CALL R2Ro(a2,dim,ai,Angle)
+        CALL R2Ro(a2,dim,dim,ai,Angle)
         CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
          
 !
