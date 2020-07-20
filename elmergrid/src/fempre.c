@@ -95,6 +95,7 @@ static void Instructions()
   printf("13) .msh      : GID mesh format\n");
   printf("14) .msh      : Gmsh mesh format\n");
   printf("15) .ep.i     : Partitioned ElmerPost format\n");
+  printf("16) .2dm      : 2D triangular FVCOM format\n");
 #if 0
   printf("16)  .d       : Easymesh input format\n");
   printf("17) .msh      : Nastran format\n");
@@ -138,8 +139,9 @@ static void Instructions()
   printf("-clone int[3]        : make ideantilcal copies of the mesh\n");
   printf("-clonesize real[3]   : the size of the mesh to be cloned if larger to the original\n");
   printf("-mirror int[3]       : copy the mesh around the origin in coordinate directions\n");
-  printf("-cloneinds           : when performing cloning should cloned entitities be given new indexes\n");
+  printf("-cloneinds           : when performing cloning should cloned entities be given new indexes\n");
   printf("-unite               : the meshes will be united\n");
+  printf("-unitenooverlap      : the meshes will be united without overlap in entity numbering\n");
   printf("-polar real          : map 2D mesh to a cylindrical shell with given radius\n");
   printf("-cylinder            : map 2D/3D cylindrical mesh to a cartesian mesh\n");
   printf("-reduce int[2]       : reduce element order at material interval [int1 int2]\n");
@@ -163,8 +165,8 @@ static void Instructions()
   printf("-3d / -2d / -1d      : mesh is 3, 2 or 1-dimensional (applies to examples)\n");
   printf("-isoparam            : ensure that higher order elements are convex\n");
   printf("-nonames             : disable use of mesh.names even if it would be supported by the format\n");
-  printf("-nosave              : disable saving part alltogether\n");
-  printf("-nooverwrite         : if mesh already exists don't overwite it\n");
+  printf("-nosave              : disable saving part altogether\n");
+  printf("-nooverwrite         : if mesh already exists don't overwrite it\n");
   printf("-vtuone              : start real node indexes in vtu file from one\n");
   printf("-timer               : show timer information\n");
   printf("-infofile str        : file for saving the timer and size information\n");
@@ -468,6 +470,21 @@ int main(int argc, char *argv[])
     Goodbye();
     break;
 
+  case 16:
+    boundaries[nofile] = (struct BoundaryType*)
+      malloc((size_t) (MAXBOUNDARIES)*sizeof(struct BoundaryType)); 	
+    for(i=0;i<MAXBOUNDARIES;i++) {
+      boundaries[nofile][i].created = FALSE; 
+      boundaries[nofile][i].nosides = 0;
+    }
+    if (LoadFvcomMesh(&(data[nofile]),boundaries[nofile],eg.filesin[nofile],TRUE))
+      Goodbye();
+    nomeshes++;
+    break;
+
+
+
+    
 #if 0
   case 16: 
     InitializeKnots(&(data[nofile]));
@@ -744,7 +761,7 @@ int main(int argc, char *argv[])
   /* Unite meshes if there are several of them */
   if(eg.unitemeshes) {
     for(k=1;k<nomeshes;k++)
-      UniteMeshes(&data[0],&data[k],boundaries[0],boundaries[k],info);
+      UniteMeshes(&data[0],&data[k],boundaries[0],boundaries[k],eg.unitenooverlap,info);
     nomeshes = nogrids = 1;
   }
   

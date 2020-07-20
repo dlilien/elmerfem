@@ -186,7 +186,7 @@ RECURSIVE SUBROUTINE TemperateIceSolver( Model,Solver,Timestep,TransientSimulati
   !------------------------------------------------------------------------------
   !    Allocate some permanent storage, this is done first time only
   !------------------------------------------------------------------------------
-  IF ( .NOT. AllocationsDone .OR. Solver % Mesh % Changed ) THEN
+  IF ( .NOT. AllocationsDone .OR. Solver % MeshChanged ) THEN
      N = Solver % Mesh % MaxElementNodes
      M = Model % Mesh % NumberOfNodes
      K = SIZE( SystemMatrix % Values )
@@ -620,7 +620,7 @@ RECURSIVE SUBROUTINE TemperateIceSolver( Model,Solver,Timestep,TransientSimulati
         MeshVelocity = 0.0d0
         CALL GetVectorLocalSolution( MeshVelocity, 'Mesh Velocity')
         !------------------------------------------------------------------------------         
-        ! asuming convection or ALE mesh contribution by default
+        ! assuming convection or ALE mesh contribution by default
         !------------------------------------------------------------------------------         
         DO i=1,N
            C1(i) = Density(i) * HeatCapacity(i)
