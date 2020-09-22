@@ -34,7 +34,7 @@
 ! *****************************************************************************/
 !>  Solver for fabric parameter equations 
 !------------------------------------------------------------------------------
-      RECURSIVE SUBROUTINE FabricSolver( Model,Solver,dt,TransientSimulation )
+      RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
 
       USE DefUtils
@@ -1318,10 +1318,6 @@ CONTAINS
 !------------------------------------------------------------------------------
    END SUBROUTINE LocalMatrixBoundary
 !------------------------------------------------------------------------------
-
-
-
 !------------------------------------------------------------------------------
- END SUBROUTINE FabricSolver
+ END SUBROUTINE SpectralFabricSolver
 !------------------------------------------------------------------------------
-
