@@ -18,7 +18,7 @@ Simulation
 
   !Output File = "test.result"
   Post File = "test.vtu"
-  max output level = 4
+  max output level = 20
 
   Initialize Dirichlet Conditions = Logical False
 End
@@ -42,12 +42,12 @@ Material 1
   Activation Energy 1 = Real 7.8e04    ! Joule/mol for T<TL
   Activation Energy 2 = Real 7.8e04    ! Joule/mol for T>TL
 
+  Isotropic = Logical True !If set to true Glen flow law (no need to defined Fabric)
+
   Viscosity File = FILE "040010010.Va"
 
-  Isotropic = Logical False !If set to true Glen flow law (no need to defined Fabric)
-
 !!!! For Fabric Solver
-  Interaction Parameter = Real 0. ! 0=> Fabric Evolution function of Strain-rates 1=> Fabric Evolution function of dev stresses
+  Interaction Parameter = Real 0.04 ! 0=> Fabric Evolution function of Strain-rates 1=> Fabric Evolution function of dev stresses
                                   !If not defined set to the default value given in Viscosity File
   Diffusion Parameter = Real 0.   ! Diffusion term. By default set to 0 if not defined
 End
@@ -74,6 +74,7 @@ Solver 1
   Equation = AIFlow
   Variable = AIFlow
   Variable DOFs = 3                        !3 for 2D -- 4 for 3D
+  Exec Solver = Before Simulation
 
   Exported Variable 1 = Temperature        !Define Temperature Mandatory!!
   Exported Variable 1 DOFS = Integer 1
@@ -114,6 +115,7 @@ Solver 2
 
   Procedure = "ElmerIceSolvers" "SpectralFabricSolver"
   Discontinuous Galerkin = Logical True
+  Fabric Order = Integer 5
 
 
   Linear System Solver = Direct

@@ -22,14 +22,12 @@
 ! *****************************************************************************/
 ! ******************************************************************************
 ! *
-! *  Authors:  Juha Ruokolainen, Olivier Gagliardini, Fabien Gillet-Chaulet
-! *  Email:   Juha.Ruokolainen@csc.fi
+! *  Authors:  David A. Lilien
+! *  Email:   dlilien90@gmail.com
+! *  Based on FabricSolve.F90, by Juha Ruokolainen, Olivier Gagliardini,
+! *                               and Fabien Gillet-Chaulet
 ! *  Web:     http://elmerice.elmerfem.org
-! *  Address: CSC - IT Center for Science Ltd.
-! *           Keilaranta 14
-! *           02101 Espoo, Finland 
-! *
-! *       Date of modification: 03/05
+! *       Date of modification: 09/20
 ! *
 ! *****************************************************************************/
 !>  Solver for fabric parameter equations 
@@ -43,7 +41,7 @@
 !------------------------------------------------------------------------------
 !******************************************************************************
 !
-!  Solve stress equations for one timestep
+!  Solve Fabric equations at one timestep
 !
 !  ARGUMENTS:
 !
@@ -58,90 +56,70 @@
 !            currently)
 !
 !******************************************************************************
+      TYPE(Model_t)  :: Model
+      TYPE(Solver_t), TARGET :: Solver
 
-     TYPE(Model_t)  :: Model
-     TYPE(Solver_t), TARGET :: Solver
-
-     LOGICAL ::  TransientSimulation
-     REAL(KIND=dp) :: dt
+      LOGICAL ::  TransientSimulation
+      REAL(KIND=dp) :: dt
 !------------------------------------------------------------------------------
 !    Local variables
 !------------------------------------------------------------------------------
-     TYPE(Solver_t), POINTER :: PSolver
+      TYPE(Nodes_t) :: ElementNodes
+      TYPE(Solver_t), POINTER :: PSolver
+      TYPE(Matrix_t), POINTER :: StiffMatrix
+      TYPE(ValueList_t), POINTER :: Material, BC, SolverParams
+      TYPE(Element_t), POINTER :: CurrentElement, Element, &
+           ParentElement, LeftParent, RightParent, Edge
 
-     TYPE(Matrix_t),POINTER :: StiffMatrix
+      TYPE(Variable_t), POINTER :: FabricSol, TempSol, FabricVariable, &
+           FlowVariable, EigenFabricVariable, MeshVeloVariable, &
+           TimeVar
 
-     INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat
-
-     TYPE(ValueList_t),POINTER :: Material, BC
-     TYPE(Nodes_t) :: ElementNodes
-     TYPE(Element_t),POINTER :: CurrentElement, Element, &
-              ParentElement, LeftParent, RightParent, Edge
-
-     REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm,Gravity(3), &
-         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(7)
-
-
-     INTEGER :: NewtonIter,NonlinearIter
-
-     TYPE(Variable_t), POINTER :: FabricSol, TempSol, FabricVariable, FlowVariable, &
-                                  EigenFabricVariable, MeshVeloVariable
-
-     REAL(KIND=dp), POINTER :: Temperature(:),Fabric(:), &
+      REAL(KIND=dp), POINTER :: Temperature(:),Fabric(:), &
            FabricValues(:), FlowValues(:), EigenFabricValues(:), &
-           MeshVeloValues(:), Solution(:), Ref(:)
+           MeshVeloValues(:), Solution(:), Ref(:), &
+           PrevFabric(:),CurrFabric(:),TempFabVal(:)
 
-     INTEGER, POINTER :: TempPerm(:),FabricPerm(:),NodeIndexes(:), &
-                        FlowPerm(:), MeshVeloPerm(:), EigenFabricPerm(:)
+      INTEGER, POINTER :: TempPerm(:),FabricPerm(:),NodeIndexes(:), &
+           FlowPerm(:), MeshVeloPerm(:), EigenFabricPerm(:)
 
-     REAL(KIND=dp) :: rho,lambda   !Interaction parameter,diffusion parameter
-     REAL(KIND=dp) :: A1plusA2
-     Real(KIND=dp), parameter :: Rad2deg=180._dp/Pi
-     REAL(KIND=dp) :: a2(6)
-     REAL(KIND=dp) :: ai(3), Angle(3)
+      INTEGER :: body_id,bf_id,eq_id, comp, Indexes(128),SpectralOrder,&
+                 SpectralDim, old_body = -1, NewtonIter,NonlinearIter, &
+                 dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat
 
-     LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
+      REAL(KIND=dp) :: rho, lambda, A1plusA2, Bu, Bv, Bw, &
+           a2(6), ai(3), Angle(3), FabricGrid(4879), RM(3,3), &
+           SaveTime = -1, RelativeChange,UNorm,PrevUNorm,Gravity(3), &
+           Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(7)
 
-     INTEGER :: body_id,bf_id,eq_id, comp, Indexes(128)
-!
-     INTEGER :: old_body = -1
+      REAL(KIND=dp), parameter :: Rad2deg=180._dp/Pi
 
-     REAL(KIND=dp) :: FabricGrid(4879)                   
-                        
-     LOGICAL :: AllocationsDone = .FALSE., FreeSurface
+      CHARACTER(LEN=MAX_NAME_LEN) :: SolverName='SpectralFabric',&
+                                     TempName, FlowName, ViscosityFile
 
-     TYPE(Variable_t), POINTER :: TimeVar
+      LOGICAL :: GotForceBC,GotIt,NewtonLinearization=.FALSE.,&
+                 UnFoundFatal=.TRUE.,AllocationsDone = .FALSE.,&
+                 FreeSurface
 
-     REAL(KIND=dp), ALLOCATABLE:: MASS(:,:), STIFF(:,:),  &
-       LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
-       Alpha(:,:),Beta(:), K1(:), K2(:), E1(:), E2(:), E3(:), &
-       Velocity(:,:), MeshVelocity(:,:)
+      REAL(KIND=dp), ALLOCATABLE:: MASS(:,:), STIFF(:,:),  &
+        LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
+        Alpha(:,:),Beta(:),Velocity(:,:), MeshVelocity(:,:), &
+        LocalFabric(:)
 
-     SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
-          LocalTemperature, LocalFluidity,  AllocationsDone, K1, K2, &
-          E1, E2, E3, Wn,  FabricGrid, rho, lambda, Velocity, &
-          MeshVelocity, old_body, dim, comp
-!------------------------------------------------------------------------------
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile
+      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
+           LocalTemperature, LocalFluidity,  AllocationsDone, &
+           Wn,  FabricGrid, rho, lambda, Velocity, &
+           MeshVelocity, old_body, dim, comp, SolverName, TempName, &
+           FlowName, SpectralOrder, SpectralDim, ViscosityFile, &
+           PrevFabric, CurrFabric,TempFabVal
 
-     REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
-     REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
-
-     SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal
 #ifdef USE_ISO_C_BINDINGS
-     REAL(KIND=dp) :: at, at0
+      REAL(KIND=dp) :: at, at0
 #else
-     REAL(KIND=dp) :: at, at0, CPUTime, RealTime
+      REAL(KIND=dp) :: at, at0, CPUTime, RealTime
 #endif
-!------------------------------------------------------------------------------
-      INTERFACE
-        Subroutine R2Ro(a2,dim,ai,angle)
-        USE Types
-        REAL(KIND=dp),intent(in) :: a2(6)
-        Integer :: dim
-        REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
-       End Subroutine R2Ro
-      End Interface                                                       
+
+
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
@@ -149,7 +127,7 @@
       Wn(7) = ListGetConstReal( Model % Constants, 'Gas Constant', GotIt,UnFoundFatal=UnFoundFatal )
       !Previous default value: Wn(7) = 8.314
       WRITE(Message,'(A,F10.4)')'Gas Constant =',Wn(7)
-      CALL INFO('FabricSolve',Message,Level=4)
+      CALL INFO(SolverName,Message,Level=4)
 !------------------------------------------------------------------------------
 !    Get variables needed for solution
 !------------------------------------------------------------------------------
@@ -162,33 +140,52 @@
       FabricPerm   => FabricSol % Perm
       FabricValues => FabricSol % Values
 
-      TempSol => VariableGet( Solver % Mesh % Variables, 'Temperature' )
-      IF ( ASSOCIATED( TempSol) ) THEN
-       TempPerm    => TempSol % Perm
-       Temperature => TempSol % Values
-      END IF
-
-      FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
-      IF ( ASSOCIATED( FlowVariable ) ) THEN
-       FlowPerm    => FlowVariable % Perm
-       FlowValues  => FlowVariable % Values
-      END IF
       
-!!!!! Mesh Velo
-     MeshVeloVariable => VariableGet( Solver % Mesh % Variables, &
-            'Mesh Velocity' )
+      SolverParams => GetSolverParams()
+      SpectralOrder = ListGetInteger( SolverParams,'Fabric Order', &
+          GotIt,UnFoundFatal=.TRUE. )
+      SpectralDim = (SpectralOrder * (SpectralOrder + 1)) / 2
 
-     IF ( ASSOCIATED( MeshVeloVariable ) ) THEN
-       MeshVeloPerm    => MeshVeloVariable % Perm
-       MeshVeloValues  => MeshVeloVariable % Values
-     END IF
+      TempName = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal=.FALSE. )
+      IF (.NOT.GotIt) THEN
+          TempName = 'Temperature'
+      END IF
+      TempSol => VariableGet( Solver % Mesh % Variables, TempName )
+      IF ( ASSOCIATED( TempSol) ) THEN
+        TempPerm    => TempSol % Perm
+        Temperature => TempSol % Values
+      END IF
+      WRITE(Message,'(A,A)') 'Temperature variable = ', TempName
+      CALL INFO(SolverName, Message , level = 20)
+
+      FlowName = ListGetString( SolverParams,'Flow Solution Name',GotIt,UnFoundFatal=.FALSE. )
+      IF (.NOT.GotIt) THEN
+          FlowName = 'AIFlow'
+      END IF
+      FlowVariable => VariableGet( Solver % Mesh % Variables, FlowName)
+      IF ( ASSOCIATED( FlowVariable ) ) THEN
+        FlowPerm    => FlowVariable % Perm
+        FlowValues  => FlowVariable % Values
+        WRITE(Message,'(A,A)') 'Flow variable = ', FlowName
+        CALL INFO(SolverName, Message , level = 20)
+      ELSE
+        WRITE(Message,'(A,A)') 'Flow variable not found:', FlowName
+        CALL FATAL(SolverName, message)
+      END IF
+
+      
+      MeshVeloVariable => VariableGet( Solver % Mesh % Variables, &
+            'Mesh Velocity' )
+      IF ( ASSOCIATED( MeshVeloVariable ) ) THEN
+        MeshVeloPerm    => MeshVeloVariable % Perm
+        MeshVeloValues  => MeshVeloVariable % Values
+      END IF
        
                                        
       StiffMatrix => Solver % Matrix
-      ! UNorm = Solver % Variable % Norm
       Unorm = SQRT( SUM( FabricValues**2 ) / SIZE(FabricValues) )
-!------------------------------------------------------------------------------
 
+!------------------------------------------------------------------------------
 !------------------------------------------------------------------------------
 !     Allocate some permanent storage, this is done first time only
 !------------------------------------------------------------------------------
@@ -199,35 +196,35 @@
        
        IF ( AllocationsDone ) THEN
          DEALLOCATE( LocalTemperature, &
-                     K1,K2,E1,E2,E3, &
                      Force, LocalFluidity, &
                      Velocity,MeshVelocity, &
                      MASS,STIFF,      &
                      LOAD, Alpha, Beta, &
-                     CurrFabric, TempFabVal )
+                     CurrFabric, TempFabVal, &
+                     LocalFabric)
        END IF
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
-                 K1( N ), K2( N ), E1( N ), E2( N ), E3( N ), &
                  Force( 2*STDOFs*N ), &
                  Velocity(4, N ),MeshVelocity(3,N), &
                  MASS( 2*STDOFs*N,2*STDOFs*N ),  &
                  STIFF( 2*STDOFs*N,2*STDOFs*N ),  &
                  LOAD( 4,N ), Alpha( 3,N ), Beta( N ), &
-                 CurrFabric( 5*SIZE(Solver % Variable % Values)), &
+                 CurrFabric(SpectralDim*SIZE(Solver % Variable % Values)), &
                  TempFabVal( SIZE(FabricValues)), &
+                 LocalFabric(N * SpectralDim), &
                  STAT=istat )
 
 
        IF ( istat /= 0 ) THEN
-          CALL Fatal( 'FabricSolve', 'Memory allocation error.' )
+         CALL FATAL(SolverName, 'Memory allocation error.' )
        END IF
 
        CurrFabric = 0.
        TempFabVal = 0.
        IF ( TransientSimulation ) THEN
-          IF (AllocationsDone ) DEALLOCATE (PrevFabric)
-          ALLOCATE( PrevFabric( 5*SIZE(Solver % Variable % Values)) )
+         IF (AllocationsDone ) DEALLOCATE (PrevFabric)
+         ALLOCATE( PrevFabric(SpectralDim*SIZE(Solver % Variable % Values)) )
          PrevFabric = 0.
        END IF
 
@@ -237,13 +234,13 @@
           n = GetElementNOFNodes()
           NodeIndexes => CurrentElement % NodeIndexes
           Indexes(1:n) = Solver % Variable % Perm( Indexes(1:n) )
-          DO COMP=1,5
+          DO COMP=1,SpectralDim
             IF ( TransientSimulation ) THEN
-               PrevFabric(5*(Indexes(1:n)-1)+COMP) = &
-                   FabricValues(5*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+               PrevFabric(SpectralDim*(Indexes(1:n)-1)+COMP) = &
+                   FabricValues(SpectralDim*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
             END IF
-               CurrFabric(5*(Indexes(1:n)-1)+COMP) = &
-                   FabricValues(5*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+               CurrFabric(SpectralDim*(Indexes(1:n)-1)+COMP) = &
+                   FabricValues(SpectralDim*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
           END DO
        END DO
 
@@ -276,52 +273,42 @@
          'Nonlinear System Max Iterations',GotIt )
 
       IF ( .NOT.GotIt ) NonlinearIter = 1
-!------------------------------------------------------------------------------
-
-!------------------------------------------------------------------------------
-
-!------------------------------------------------------------------------------
       DO iter=1,NonlinearIter
-!------------------------------------------------------------------------------
-       at  = CPUTime()
-       at0 = RealTime()
+        at  = CPUTime()
+        at0 = RealTime()
 
-
-       CALL Info( 'FabricSolve', ' ', Level=4 )
-       CALL Info( 'FabricSolve', ' ', Level=4 )
-       CALL Info( 'FabricSolve', &
+        CALL Info( SolverName, ' ', Level=4 )
+        CALL Info( SolverName, ' ', Level=4 )
+        CALL Info( SolverName, &
                     '-------------------------------------',Level=4 )
-       WRITE( Message, * ) 'Fabric solver  iteration', iter
-       CALL Info( 'FabricSolve', Message,Level=4 )
-       CALL Info( 'FabricSolve', &
+        WRITE( Message, * ) 'Spectral Fabric solver  iteration', iter
+        CALL Info( SolverName, Message,Level=4 )
+        CALL Info( SolverName, &
                      '-------------------------------------',Level=4 )
-       CALL Info( 'FabricSolve', ' ', Level=4 )
-       CALL Info( 'FabricSolve', 'Starting assembly...',Level=4 )
+        CALL Info( SolverName, ' ', Level=4 )
+        CALL Info( SolverName, 'Starting assembly...',Level=4 )
 
-!------------------------------------------------------------------------------
-
-       PrevUNorm = UNorm
+        PrevUNorm = UNorm
        
-       DO COMP=1,2*dim-1
+        DO COMP=1,SpectralDim
+          Solver % Variable % Values = CurrFabric( COMP::SpectralDim )
+          IF ( TransientSimulation ) THEN
+            Solver % Variable % PrevValues(:,1) = PrevFabric(COMP::SpectralDim )
+          END IF
 
-       Solver % Variable % Values = CurrFabric( COMP::5 )
-       IF ( TransientSimulation ) THEN
-          Solver % Variable % PrevValues(:,1) = PrevFabric( COMP::5 )
-       END IF
-
-       CALL DefaultInitialize()
+          CALL DefaultInitialize()
 !------------------------------------------------------------------------------
-       DO t=1,Solver % NumberOFActiveElements
+          DO t=1,Solver % NumberOFActiveElements
 !------------------------------------------------------------------------------
 
-         IF ( RealTime() - at0 > 1.0 ) THEN
-           WRITE(Message,'(a,i3,a)' ) '   Assembly: ', INT(100.0 - 100.0 * &
-            (Solver % NumberOfActiveElements-t) / &
-               (1.0*Solver % NumberOfActiveElements)), ' % done'
-                       
-           CALL Info( 'FabricSolve', Message, Level=5 )
-           at0 = RealTime()
-         END IF
+            IF ( RealTime() - at0 > 1.0 ) THEN
+              WRITE(Message,'(a,i3,a)' ) '   Assembly: ', INT(100.0 - 100.0 * &
+               (Solver % NumberOfActiveElements-t) / &
+                  (1.0*Solver % NumberOfActiveElements)), ' % done'
+                           
+              CALL Info(SolverName, Message, Level=5 )
+              at0 = RealTime()
+            END IF
 
          CurrentElement => GetActiveElement(t)
          CALL GetElementNodes( ElementNodes )
@@ -332,6 +319,7 @@
          
          Material => GetMaterial()
          body_id = CurrentElement % BodyId
+
 !------------------------------------------------------------------------------
 !        Read in material constants from Material section
 !------------------------------------------------------------------------------
@@ -343,7 +331,7 @@
          LocalFluidity(1:n) = ListGetReal( Material, &
                          'Fluidity Parameter', n, NodeIndexes, GotIt,&
                          UnFoundFatal=UnFoundFatal)
-         !Previous default value: LocalFluidity(1:n) = 1.0
+
 !------------------------------------------------------------------------------
 !        Get element local stiffness & mass matrices
 !------------------------------------------------------------------------------
@@ -357,11 +345,9 @@
             LocalTemperature(1:n) = 0.0d0
          END IF
 
-         K1(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+1 )
-         K2(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+2 )
-         E1(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+3 )
-         E2(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+4 )
-         E3(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+5 )
+         DO i=1,SpectralDim
+            LocalFabric((i * n + 1):(i + 1)*n) = CurrFabric(SpectralDim*(Solver % Variable % Perm(Indexes(1:n))-1)+i )
+         END DO
 
          k = FlowVariable % DOFs
          Velocity = 0.0d0
@@ -379,8 +365,8 @@
          EndIF
 !----------------------------------
 
-         CALL LocalMatrix( COMP, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-           E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
+         CALL LocalMatrix( COMP, MASS, STIFF, FORCE, LOAD, &
+           LocalTemperature, LocalFluidity, LocalFabric, Velocity, &
            MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda )
 
 !------------------------------------------------------------------------------
@@ -390,7 +376,7 @@
          CALL DefaultUpdateEquations( STIFF, FORCE )
 !------------------------------------------------------------------------------
       END DO
-      CALL Info( 'FabricSolve', 'Assembly done', Level=4 )
+      CALL Info( SolverName, 'Assembly done', Level=4 )
 !------------------------------------------------------------------------------
    
 !------------------------------------------------------------------------------
@@ -526,7 +512,7 @@
 
       CALL DefaultFinishAssembly()
 !------------------------------------------------------------------------------
-      CALL Info( 'FabricSolve', 'Set boundaries done', Level=4 )
+      CALL Info( SolverName, 'Set boundaries done', Level=4 )
 
 !------------------------------------------------------------------------------
 !     Solve the system and check for convergence
@@ -534,7 +520,7 @@
       Unorm = DefaultSolve()
 !      CurrFabric( COMP::5 ) = Solver % Variable % Values
       WRITE(Message,*) 'solve done', minval( solver % variable % values), maxval( Solver % variable % values)
-      CALL Info( 'FabricSolve', Message, Level=4 )
+      CALL Info( SolverName, Message, Level=4 )
       
       n1 = Solver % Mesh % NumberOfNodes
       ALLOCATE( Ref(n1) )
@@ -581,25 +567,6 @@
        FabricValues( COMP:SIZE(FabricValues):5 ) = &
        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):5 ) , 0._dp),1._dp)
        
-     !  !DO i=1,SIZE(FabricValues),5 
-     !  !  IF((FabricValues(i)+FabricValues(i+1)).GT.1._dp) THEN
-     !  !      A1plusA2=FabricValues(i)+FabricValues(i+1)
-     !  !      FabricValues(i)= &
-     !  !        FabricValues(i)/A1plusA2
-     !  !      FabricValues(i+1)= &
-     !  !        FabricValues(i+1)/A1plusA2
-     !  !   END IF
-     !  ! END DO
-     !   
-
-!      CASE(3:5)
-!       DO i=COMP,SIZE(FabricValues),5
-!         IF(FabricValues(i).GT.0._dp) THEN
-!               FabricValues(i) = MIN( FabricValues(i) , 0.5_dp)
-!         ELSE
-!               FabricValues(i) = MAX( FabricValues(i) , -0.5_dp)
-!         END IF
-!       END DO
       END SELECT
 
       END DO ! End DO Comp
@@ -627,9 +594,9 @@
       END IF
 
       WRITE( Message, * ) 'Result Norm   : ',UNorm
-      CALL Info( 'FabricSolve', Message, Level=4 )
+      CALL Info( SolverName, Message, Level=4 )
       WRITE( Message, * ) 'Relative Change : ',RelativeChange
-      CALL Info( 'FabricSolve', Message, Level=4 )
+      CALL Info( SolverName, Message, Level=4 )
 
       
 !------------------------------------------------------------------------------
@@ -641,46 +608,6 @@
 !------------------------------------------------------------------------------
       EigenFabricVariable => &
        VariableGet( Solver % Mesh % Variables, 'EigenV' )
-     IF ( ASSOCIATED( EigenFabricVariable ) ) THEN
-         EigenFabricPerm    => EigenFabricVariable % Perm
-         EigenFabricValues => EigenFabricVariable % Values
-      
-         DO t=1,Solver % NumberOFActiveElements
-
-           CurrentElement => GetActiveElement(t)
-           n = GetElementNOFNodes()
-           NodeIndexes => CurrentElement % NodeIndexes
-
-           K1(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+1 )
-           K2(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+2 )
-           E1(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+3 )
-           E2(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+4 )
-           E3(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+5 )
-         
-           Do i=1,n
-            a2(1)=K1(i)
-            a2(2)=K2(i)
-            a2(3)=1._dp-a2(1)-a2(2)
-            a2(4)=E1(i)
-            a2(5)=E2(i)
-            a2(6)=E3(i)
-
-            call R2Ro(a2,dim,ai,angle)
-
-            angle(:)=angle(:)*rad2deg
-            If (angle(1).gt.90._dp) angle(1)=angle(1)-180._dp
-            If (angle(1).lt.-90._dp) angle(1)=angle(1)+180._dp
-          
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 1)=ai(1)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 2)=ai(2)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 3 )=ai(3)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 4 )=angle(1)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 5 )=angle(2)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 6 )=angle(3)
-           End do
-        END DO
-
-      END IF
 !------------------------------------------------------------------------------
     END DO ! of nonlinear iter
 !------------------------------------------------------------------------------
@@ -743,68 +670,55 @@ CONTAINS
 
 !------------------------------------------------------------------------------
       SUBROUTINE LocalMatrix( Comp, MASS, STIFF, FORCE, LOAD, &
-          NodalK1, NodalK2, NodalEuler1, NodalEuler2, NodalEuler3, & 
+          NodalFabric, & 
           NodalTemperature, NodalFluidity, NodalVelo, NodMeshVel, &
           Element, n, Nodes, Wn, rho,lambda )
 !------------------------------------------------------------------------------
-
-     REAL(KIND=dp) :: STIFF(:,:),MASS(:,:)
-     REAL(KIND=dp) :: LOAD(:,:), NodalVelo(:,:),NodMeshVel(:,:)
-     REAL(KIND=dp), DIMENSION(:) :: FORCE, NodalK1, NodalK2, NodalEuler1, &
-               NodalEuler2, NodalEuler3, NodalTemperature, NodalFluidity
-
-     TYPE(Nodes_t) :: Nodes
-     TYPE(Element_t) :: Element
-     INTEGER :: n, Comp
+! Inputs and Outputs
 !------------------------------------------------------------------------------
-!
-     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
-     REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
+      REAL(KIND=dp) :: STIFF(:,:),MASS(:,:)
+      REAL(KIND=dp) :: LOAD(:,:), NodalVelo(:,:),NodMeshVel(:,:)
+      REAL(KIND=dp), DIMENSION(:) :: FORCE, NodalFabric, &
+                                     NodalTemperature, NodalFluidity
 
-     REAL(KIND=dp) :: A1, A2, A3, E1, E2, E3, Theta
+      TYPE(Nodes_t) :: Nodes
+      TYPE(Element_t) :: Element
+      INTEGER :: n, Comp
+!------------------------------------------------------------------------------
+!    Local variables
+!------------------------------------------------------------------------------
+      REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
+      REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
 
-     REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
-     REAL(KIND=dp) :: LoadAtIp, Temperature
-     REAL(KIND=dp) :: rho,lambda,Deq, ai(6),a4(9),hmax
+      REAL(KIND=dp) :: Theta
 
-     INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3), DOFs = 1
+      REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
+      REAL(KIND=dp) :: LoadAtIp, Temperature
+      REAL(KIND=dp) :: rho,lambda,Deq, ai(6),a4(9),hmax
 
-     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), C44,C55,C66
-     REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
+      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3), DOFs = 1
 
-     REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
-     REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3)
-     Integer :: INDi(6),INDj(6)
-     LOGICAL :: CSymmetry
-     
-     LOGICAL :: Fond
+      REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), C44,C55,C66
+      REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
+
+      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
+      REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3)
+      INTEGER :: INDi(6),INDj(6)
+      LOGICAL :: CSymmetry, Fond
               
-!              
-     INTEGER :: N_Integ
-     REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
+      INTEGER :: N_Integ
+      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ, &
+                                              W_Integ,S_Integ
 
-     LOGICAL :: stat
-     TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
+      LOGICAL :: stat
+      TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
 
-     INTERFACE
+      INTERFACE
         FUNCTION BGlenT( Tc, W)
            USE Types
            REAL(KIND=dp) :: BGlenT,Tc,W(7)
         END FUNCTION
         
-        SUBROUTINE IBOF(ai,a4)
-           USE Types
-           REAL(KIND=dp),intent(in) :: ai(6)
-           REAL(KIND=dp),intent(out) :: a4(9)
-        END SUBROUTINE
-
-        Subroutine R2Ro(ai,dim,a2,angle)
-         USE Types
-         REAL(KIND=dp),intent(in) :: ai(6)
-         Integer :: dim
-         REAL(KIND=dp),intent(out) :: a2(3), Angle(3)
-        End Subroutine R2Ro
-
         Subroutine OPILGGE_ai_nl(a2,Angle,etaI,eta36)
           USE Types
           REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: a2
@@ -812,7 +726,16 @@ CONTAINS
           REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
           REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
         END SUBROUTINE OPILGGE_ai_nl
-        
+
+        Subroutine Wigner3j(w3j, jmin, jmax, j2, j3, m1, m2, m3, exitstatus)
+        Use types
+        ! j  j2 j3
+        ! m1 m2 m3
+        integer, intent(in) :: j2, j3, m1, m2, m3
+        integer, intent(out) :: jmin, jmax
+        integer, intent(out), optional :: exitstatus
+        real(kind=dp), intent(out) :: w3j(j2 + j3 + 1)
+        End Subroutine Wigner3j
       END INTERFACE
 !------------------------------------------------------------------------------
       Fond=.False.
@@ -853,17 +776,7 @@ CONTAINS
                Basis, dBasisdx, ddBasisddx, .FALSE. )
 
       s = SqrtElementMetric * S_Integ(t)
-!------------------------------------------------------------------------------
-!
-!     Orientation parameters at the integration point:
-!     ------------------------------------------------
-      A1 = SUM( NodalK1(1:n) * Basis(1:n) ) 
-      A2 = SUM( NodalK2(1:n) * Basis(1:n) )
-      A3 = 1._dp - A1 - A2
 
-      E1 = SUM( NodalEuler1(1:n) * Basis(1:n) )
-      E2 = SUM( NodalEuler2(1:n) * Basis(1:n) )
-      E3 = SUM( NodalEuler3(1:n) * Basis(1:n) )
 !
 !      Fluidity  at the integration point:
 !---------------------------------------------
@@ -890,19 +803,6 @@ CONTAINS
 !    Material parameters at that point
 !    ---------------------------------
 !
-      ai(1)=A1
-      ai(2)=A2
-      ai(3)=A3
-      ai(4)=E1
-      ai(5)=E2
-      ai(6)=E3
-
-!    fourth order orientation tensor
-      call IBOF(ai,a4)
-      
-!     A2 expressed in the orthotropic frame
-!
-      call R2Ro(ai,dim,ap,angle)
 
 !     Get viscosity
 
@@ -986,48 +886,19 @@ CONTAINS
       END DO
       Unorm = SQRT( SUM( Velo**2._dp ) )
 
-!
-!     Reaction coefficient:
-!     ---------------------
-      SELECT CASE(comp)
-      CASE(1)
-        !C0 = -2._dp*(SD(1)-SD(3))
-        C0=-2._dp*SD(1)-3._dp*lambda*Deq
-      CASE(2)
-        !C0 = -2._dp*(SD(2)-SD(3))
-        C0 = -2._dp*SD(2)-3._dp*lambda*Deq
-       
-      CASE(3)
-        !C0 = -(SD(1)+SD(2)-2._dp*SD(3))
-        C0 = -(SD(1)+SD(2))-3._dp*lambda*Deq
-        
-      CASE(4)
-        C0 = -(SD(2)-SD(3))-3._dp*lambda*Deq
-
-      CASE(5)
-        C0 = -(SD(1)-SD(3))-3._dp*lambda*Deq
-
-        
-      END SELECT
-
       If (Fond) C0=0._dp
 
 !     Loop over basis functions (of both unknowns and weights):
 !     ---------------------------------------------------------
       DO p=1,NBasis
          DO q=1,NBasis
-            A = 0.0d0
             M = Basis(p) * Basis(q)
-!
-!           Reaction terms:
-!           ---------------
-            A = A - C0 * Basis(q) * Basis(p)
 
             !
             ! Advection terms:
             ! ----------------
             DO j=1,dim
-               A = A - Velo(j) * Basis(q) * dBasisdx(p,j)
+               A = Velo(j) * Basis(q) * dBasisdx(p,j)
             END DO
 
 !           Add nodal matrix to element matrix:
@@ -1040,55 +911,8 @@ CONTAINS
 !
 !        The righthand side...:
 !        ----------------------
-         SELECT CASE(comp)
-         
-         CASE(1)
-         
-          LoadAtIp = 2._dp*( Spin(1)*E1 + SD(4)*(2._dp*a4(7)-E1) + &
-          SD(1)*a4(1) + SD(2)*a4(3) - SD(3)*(-A1+a4(1)+a4(3)) ) + & 
-                      lambda*Deq
+!        OK, this is where we plug in Nicholas's model
 
-          IF(dim == 3) THEN
-            LoadAtIp =  LoadAtIp + 2._dp*( -Spin(3)*E3 + &
-            SD(6)*(2._dp*a4(6)-E3) + 2._dp*SD(5)*a4(4) )
-          END IF
-          
-         
-         CASE(2)
-          LoadAtIp = 2._dp*( -Spin(1)*E1 + SD(4)*(2._dp*a4(9)-E1) + &
-          SD(2)*a4(2) + SD(1)*a4(3) - SD(3)*(-A2+a4(2)+a4(3)) )  +  &
-                        lambda*Deq
-          
-          IF(dim == 3) THEN
-            LoadAtIp =  LoadAtIp + 2._dp*( Spin(2)*E2 + &
-            SD(5)*(2._dp*a4(8)-E2) + 2._dp*SD(6)*a4(5) )
-          END IF
-
-
-         CASE(3)
-          LoadAtIp = Spin(1)*(A2-A1)  +  SD(4)*(4._dp*a4(3)-A1-A2) + &
-          2._dp* ( SD(1)*a4(7) + SD(2)*a4(9) - SD(3)*(-E1+a4(7)+a4(9)) )
-          
-          IF(dim == 3) THEN
-           LoadAtIp =  LoadAtIp - Spin(3)*E2 + Spin(2)*E3  &
-           + SD(6)*(4._dp*a4(4)-E2) + SD(5)*(4._dp*a4(5)-E3)  
-          END IF
-           
-         CASE(4)
-          LoadAtIp = Spin(2)*(A3-A2) +  Spin(3)*E1 - Spin(1)*E3 +&
-          SD(4)*(4._dp*a4(5)-E3) + SD(5)*(3._dp*A2-A3-4._dp*(a4(2)+a4(3))) &
-          + SD(6)*(3._dp*E1-4._dp*(a4(7)+a4(9))) + &
-          2._dp*( SD(1)*a4(4) + SD(2)*a4(8) - SD(3)*(a4(4)+a4(8)) )
-
-         CASE(5)
-          LoadAtIp = Spin(3)*(A1-A3) +  Spin(1)*E2 - Spin(2)*E1 +&
-           SD(4)*(4._dp*a4(4)-E2) + &
-          SD(6)*(3._dp*A1-A3-4.*(a4(1)+a4(3))) + SD(5)*(3._dp*E1-4._dp*(a4(7)+a4(9))) + &
-          2._dp*( SD(1)*a4(6) + SD(2)*a4(5) - SD(3)*(a4(6)+a4(5)) )
-
-
-
-         END SELECT
 
         If (Fond) LoadAtIp=0._dp
         LoadAtIp= LoadAtIp * Basis(p)
