@@ -44,22 +44,19 @@ Material 1
 
   Isotropic = Logical True !If set to true Glen flow law (no need to defined Fabric)
 
-  Viscosity File = FILE "040010010.Va"
-
-!!!! For Fabric Solver
-  Interaction Parameter = Real 0.04 ! 0=> Fabric Evolution function of Strain-rates 1=> Fabric Evolution function of dev stresses
-                                  !If not defined set to the default value given in Viscosity File
-  Diffusion Parameter = Real 0.   ! Diffusion term. By default set to 0 if not defined
+  !!!! For Fabric Solver
+  Interaction Parameter = Real 0.0
 End
 
 !%%%%%%%%%%%%%%%%%%%%%      Initial Condition
 Initial Condition 1
 
-  Fabric 1 = Real 0.33333333333333 !a2_11
-  Fabric 2 = Real 0.33333333333333 !a2_22
-  Fabric 3 = Real 0.               !a2_12
-  Fabric 4 = Real 0.               !a2_23
-  Fabric 5 = Real 0.               !a2_13
+  SpectralFabric 1 = Real 0.33    ! C_0^0
+  SpectralFabric 2 = Real 0.33
+  SpectralFabric 3 = Real 0.33
+  SpectralFabric 4 = Real 0.0
+  SpectralFabric 5 = Real 0.0
+  SpectralFabric 6 = Real 0.0
 
   AIFlow 1 = Real 0.0              ! u_1
   AIFlow 2 = Real 0.0              ! u_2
@@ -79,14 +76,11 @@ Solver 1
   Exported Variable 1 = Temperature        !Define Temperature Mandatory!!
   Exported Variable 1 DOFS = Integer 1
 
-  Exported Variable 2 = Fabric             !Define Fabric Variable !!Mandatory if Isotropic=False
-  Exported Variable 2 DOFS = Integer 5
+  Exported Variable 2 =  StrainRate        ! Compute SR
+  Exported Variable 2 DOFS = Integer 4     !4 in 2D  6 in 3D (11,22,33,12,23,31)
 
-  Exported Variable 3 =  StrainRate        ! Compute SR
-  Exported Variable 3 DOFS = Integer 4     !4 in 2D  6 in 3D (11,22,33,12,23,31)
-
-  Exported Variable 4 =  DeviatoricStress  ! Compute Stresses
-  Exported Variable 4 DOFS = Integer 4     !4 in 2D  6 in 3D  (11,22,33,12,23,31)
+  Exported Variable 3 =  DeviatoricStress  ! Compute Stresses
+  Exported Variable 3 DOFS = Integer 4     !4 in 2D  6 in 3D  (11,22,33,12,23,31)
 
   Exported Variable 4 =  Spin              ! Compute Spin
   Exported Variable 4 DOFS = Integer 1     !1 in 2D  3 in 3D (12,23,31)
@@ -110,13 +104,16 @@ End
 !!!!!Fabric Solver
 Solver 2
   Equation = Fabric
-  Variable = -nooutput Compfab    ! dumy variable
-  Variable DOFs = 1               !FabricSolver compute each variable independently, Picard Type iterations
+  Variable = SpectralFabrci
+  Variable DOFs = 6
 
   Procedure = "ElmerIceSolvers" "SpectralFabricSolver"
   Discontinuous Galerkin = Logical True
-  Fabric Order = Integer 5
 
+  Fabric Order = Integer 3
+
+  Temperature Solution Name = String Temperature
+  Flow Solution Name = String AIFlow
 
   Linear System Solver = Direct
   Linear System Direct Method = umfpack
@@ -124,16 +121,14 @@ Solver 2
   Nonlinear System Max Iterations = 10
   Nonlinear System Convergence Tolerance  = 1.0e-5
   Nonlinear System Relaxation Factor = 1.00
-
-  L order = Integer 2
+  Nonlinear System Newton After Iterations = 10
+  Nonlinear System Newton After Tolerance = 1.0e-5
 End
 
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 Equation 1
   Active Solvers(2)= 1 2
-  Convection = Computed
-  Flow Solution Name = AIFlow
 End
 
 !%%%%%%%%%%%%%%%%%%%%%      Boundary Condition
@@ -143,12 +138,12 @@ Boundary Condition 1
   AIFlow 2 = Real -2.0e0
 
 
-  Fabric 1 = Real 0.33333333333333 !a2_11
-  Fabric 2 = Real 0.33333333333333 !a2_22
-  Fabric 3 = Real 0.               !a2_12
-  Fabric 4 = Real 0.               !a2_23
-  Fabric 5 = Real 0.               !a2_13
-
+  SpectralFabric 1 = Real 1.0    ! C_0^0
+  SpectralFabric 2 = Real 0.
+  SpectralFabric 3 = Real 0.
+  SpectralFabric 4 = Real 0.
+  SpectralFabric 5 = Real 0.
+  SpectralFabric 6 = Real 0.
 End
 
 Boundary Condition 2
@@ -161,7 +156,4 @@ Boundary Condition 3
   Target Boundaries = 4
   name = string 'left'
   AIFlow 1 = Real 0.0e0
-
 End
-
-
