@@ -51,6 +51,7 @@ End
 !%%%%%%%%%%%%%%%%%%%%%      Initial Condition
 Initial Condition 1
 
+  SpectralFabric = Real 0.33    ! C_0^0
   SpectralFabric 1 = Real 0.33    ! C_0^0
   SpectralFabric 2 = Real 0.33
   SpectralFabric 3 = Real 0.33
@@ -71,7 +72,7 @@ Solver 1
   Equation = AIFlow
   Variable = AIFlow
   Variable DOFs = 3                        !3 for 2D -- 4 for 3D
-  Exec Solver = Before Simulation
+  Exec Solver = Never
 
   Exported Variable 1 = Temperature        !Define Temperature Mandatory!!
   Exported Variable 1 DOFS = Integer 1
@@ -104,13 +105,13 @@ End
 !!!!!Fabric Solver
 Solver 2
   Equation = Fabric
-  Variable = SpectralFabrci
-  Variable DOFs = 6
+  Variable = SpectralFabric
+  Variable DOFs = 1
 
   Procedure = "ElmerIceSolvers" "SpectralFabricSolver"
   Discontinuous Galerkin = Logical True
 
-  Fabric Order = Integer 3
+  Fabric Order = Integer 1
 
   Temperature Solution Name = String Temperature
   Flow Solution Name = String AIFlow
@@ -138,6 +139,7 @@ Boundary Condition 1
   AIFlow 2 = Real -2.0e0
 
 
+  SpectralFabric = Real 1.0    ! C_0^0
   SpectralFabric 1 = Real 1.0    ! C_0^0
   SpectralFabric 2 = Real 0.
   SpectralFabric 3 = Real 0.

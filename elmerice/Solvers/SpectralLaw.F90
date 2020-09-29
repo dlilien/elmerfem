@@ -34,14 +34,15 @@
 ! *****************************************************************************/
       PROGRAM TestSpectralModel
         IMPLICIT NONE
+        INTEGER, PARAMETER :: dp=8
         INTEGER, PARAMETER :: N_TSTEPS=200,SpectralDim=6,SpectralOrder=3
         INTEGER :: i, j, k, INFO
         INTEGER :: IPIV(SpectralDim)
-        REAL(KIND=8), PARAMETER :: TSTEP=0.1
-        REAL(KIND=8) :: C(SpectralDim), DCDt(SpectralDim,SpectralDim)
-        REAL(KIND=8) :: Stiffness(SpectralDim, SpectralDim), Force(SpectralDim)
-        REAL(KIND=8) :: StrainRate(3,3), Spin(3,3)
-        REAL(KIND=8) :: OverlapMatrix
+        REAL(KIND=dp), PARAMETER :: TSTEP=0.1
+        REAL(KIND=dp) :: C(SpectralDim), DCDt(SpectralDim,SpectralDim)
+        REAL(KIND=dp) :: Stiffness(SpectralDim, SpectralDim), Force(SpectralDim)
+        REAL(KIND=dp) :: StrainRate(3,3), Spin(3,3)
+        REAL(KIND=dp) :: OverlapMatrix
         CHARACTER(len=64) :: Message
         EXTERNAL         DGESV
         !!!!
@@ -63,8 +64,8 @@
         C = 0.0
         C(1) = 1.0
 
-        WRITE(*,'(A,F8.4,A,F7.4,F7.4,F7.4,F7.4,A)') 'At time: ', 0.0, ' C is ', C(1), &
-               C(2), C(3), C(4), '...'
+        WRITE(*,'(A,F8.4,A,F7.4,F7.4,F7.4,F7.4,A)') 'At time: ', 0.0, &
+                ' C is ', C(1), C(2), C(3), C(4), '...'
         DO i = 1,N_TSTEPS
           Stiffness = 0.0
 
@@ -88,13 +89,14 @@
             C(j) = Force(j)
           END DO
           IF (MODULO(i, 10).EQ.0) THEN
-            WRITE(*,'(A,F8.4,A,F7.4,F7.4,F7.4,F7.4,A)') 'At time: ', i * TSTEP, ' C is ', C(1), &
-                  C(2), C(3), C(4), '...'
+            WRITE(*,'(A,F8.4,A,F7.4,F7.4,F7.4,F7.4,A)') 'At time: ', &
+                    i * TSTEP, ' C is ', C(1), C(2), C(3), C(4), '...'
           END IF
           CALL PostProcessFabric(C, SpectralDim)
           IF (MODULO(i, 10).EQ.0) THEN
-            WRITE(*,'(A,F7.4,F7.4,F7.4,F7.4,A)') 'After PostProcess C is ', C(1), &
-                 C(2), C(3), C(4), '...'
+            WRITE(*,'(A,F7.4,F7.4,F7.4,F7.4,A)') &
+                    'After PostProcess C is ', C(1), &
+                     C(2), C(3), C(4), '...'
           END IF
         END DO
       END PROGRAM TestSpectralModel
@@ -103,44 +105,49 @@
       SUBROUTINE SpectralModel(ProbDim, SpectralOrder, C, StrainRate, Spin, &
                                OverlapMatrix, DCDt)
         IMPLICIT NONE
+        INTEGER, PARAMETER :: dp=8
         INTEGER, INTENT(IN) :: SpectralOrder, ProbDim
         ! SpectralOrder is the maximum L, ProbDim is the resultant length of C
-        REAL(KIND=8), INTENT(IN) :: C(ProbDim), StrainRate(3, 3), Spin(3,3)
+        REAL(KIND=dp), INTENT(IN) :: C(ProbDim), StrainRate(3, 3), Spin(3,3)
         ! I have not assumed anything about the ordering of C. Define as you wish,
         ! then maybe document?
         ! I am just passing the StrainRate and Spin because the calculation of these
         ! quantities from the velocity is a bit annoying with basis functions, etc.
-        REAL(KIND=8), INTENT(IN) :: OverlapMatrix
+        REAL(KIND=dp), INTENT(IN) :: OverlapMatrix
         ! Need to relate the size of OverlapMatrix
         ! to the SpectralOrder. You can size this however you like,
         ! and I will modify the main code to match
-        REAL(KIND=8), INTENT(OUT) :: DCDt(ProbDim, ProbDim)
+        REAL(KIND=dp), INTENT(OUT) :: DCDt(ProbDim, ProbDim)
         ! I have the advection piece handled, so all that needs to be done is to deal
         ! with the Lagrangian fabric evolution. Elmer does the timestepping, so you just
         ! need to return a matrix such that the matrix DCDt * C = DC/Dt in a Lagrangian sense.
             
         INTEGER :: i
-        REAL :: MeanC
         ! Set to dummy values so that I can check if the overall code works
         ! Here, just diffusion amongst the coefficients since it is easy
         DCDt = 0.0
-        DO i = 1,ProbDim - 1
-          DCDt(i, i) = -2
-          DCDt(i, i + 1) = 1
-          DCDt(i + 1, i) = 1
-        END DO
-        DCDt(1,1) = -1.0
-        DCDt(ProbDim, ProbDim) = -1.0
+        ! No guarantees on previous values, so leave the previous line
+
+        ! DO i = 1,ProbDim - 1
+        !    DCDt(i, i) = -2
+        !    DCDt(i, i + 1) = 1
+        !    DCDt(i + 1, i) = 1
+        ! END DO
+
+        ! Zero flux at the ends
+        ! DCDt(1,1) = -1.0
+        ! DCDt(ProbDim, ProbDim) = -1.0
       END SUBROUTINE SpectralModel
 
 
       SUBROUTINE PostProcessFabric(C, ProbDim)
         IMPLICIT NONE
+        INTEGER, PARAMETER :: dp=8
         INTEGER, INTENT(IN) :: ProbDim
-        REAL(kind=8), INTENT(INOUT):: C(ProbDim)
+        REAL(kind=dp), INTENT(INOUT):: C(ProbDim)
         ! Use this function for anything that has to happen after the matrix solve.
         ! Modify C in place. This is just a dummy loop for now so that I have something
         ! To test with
-        C(1) = C(1) - 0.01
-        c(3) = C(3) + 0.01
+        ! C(1) = C(1) - 0.01
+        ! C(3) = C(3) + 0.01
       END SUBROUTINE
