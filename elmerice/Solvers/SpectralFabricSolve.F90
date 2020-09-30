@@ -354,6 +354,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
             FORCE = 0.0d0
             MASS  = 0.0d0
             CALL LocalJumps( STIFF,Edge,n,STDOFs,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
+            
             IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
             CALL DefaultUpdateEquations( STIFF, FORCE, Edge )
          END IF
@@ -611,8 +612,8 @@ CONTAINS
           DO q=1,nd
             i = SpectralDim * (p -1) + 1
             j = SpectralDim * (q -1) + 1
-            LocalMass => MASS(i:i + SpectralDim, j:j + SpectralDim)
-            LocalStiff => Stiff(i:i + SpectralDim, j:j + SpectralDim)
+            LocalMass => MASS(i:i + SpectralDim - 1, j:j + SpectralDim - 1)
+            LocalStiff => Stiff(i:i + SpectralDim - 1, j:j + SpectralDim - 1)
 
             ! Loop over basis functions (of both unknowns and weights):
             ! ---------------------------------------------------------
@@ -768,8 +769,8 @@ CONTAINS
         Udotn = SUM( Normal * cu )
 
         DO i = 1,SpectralDim
-          LocalStiff => STIFF(i:i + (n1 + n2) * SpectralDim:SpectralDim,&
-                              i:i + (n1 + n2) * SpectralDim:SpectralDim)
+          LocalStiff => STIFF(i:i + (n1 + n2 - 1) * SpectralDim:SpectralDim,&
+                              i:i + (n1 + n2 - 1) * SpectralDim:SpectralDim)
           DO p=1,n1+n2
             DO q=1,n1+n2
               STIFF(p,q) = STIFF(p,q) + s * Udotn * Average(q) * Jump(p)
@@ -862,7 +863,7 @@ CONTAINS
         ! Now go through each component
         DO p = 1,np
           DO j=1,SpectralDim
-            L = SUM( LOAD(j:j + n * SpectralDim:SpectralDim ) * Basis(1:n) )
+            L = SUM( LOAD(j:j + (n - 1) * SpectralDim:SpectralDim ) * Basis(1:n) )
             IF (InFlowBC .And. (UdotnA < 0.) ) THEN
               FORCE(SpectralDim * (p - 1) + j) = FORCE(SpectralDim * (p - 1) + j) - s * Udotn*L*ParentBasis(p)
             ELSE
