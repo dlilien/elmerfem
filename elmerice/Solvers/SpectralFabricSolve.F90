@@ -95,7 +95,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
       REAL(KIND=dp), parameter :: Rad2deg=180._dp/Pi
 
       CHARACTER(LEN=MAX_NAME_LEN) :: SolverName='SpectralFabric',&
-                                     FlowName, &
+                                     FlowName, ComponentName, &
                                      FabricName, OverlapMatrixFile
 
       LOGICAL :: GotForceBC,GotIt,NewtonLinearization=.FALSE.,&
@@ -106,8 +106,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
           Alpha(:,:),Beta(:),Velocity(:,:), MeshVelocity(:,:), LocalFabric(:)
 
       SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
-           AllocationsDone, &
-           rho, lambda, Velocity, &
+           AllocationsDone, rho, lambda, Velocity, &
            MeshVelocity, old_body, dim, comp, SolverName, &
            SpectralOrder, LocalFabric, &
            OverlapMatrix
@@ -323,7 +322,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 !
 !3D => Edges => Faces
       IF (dim.eq.3) THEN 
-        CALL FATAL(SolverName, "This is not actually 3d...")
+        CALL FATAL(SolverName, "This solver cannot actually handle 3d...")
       ELSE
         DO t=1,Solver % Mesh % NumberOfEdges
           Edge => Solver % Mesh % Edges(t)
@@ -354,7 +353,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
             FORCE = 0.0d0
             MASS  = 0.0d0
-            CALL LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
+            CALL LocalJumps( STIFF,Edge,n,STDOFs,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
             IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
             CALL DefaultUpdateEquations( STIFF, FORCE, Edge )
          END IF
@@ -363,10 +362,11 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
       END IF
 
       CALL DefaultFinishBulkAssembly()
+
 !------------------------------------------------------------------------------
 !     Loop over the boundary elements
+!         Cannot use DefaultDirichletBCs because of advection effects
 !------------------------------------------------------------------------------
-IF (.FALSE.) THEN
       DO t = 1, Solver % Mesh % NumberOfBoundaryElements
 !------------------------------------------------------------------------------
         Element => GetBoundaryElement(t)
@@ -393,28 +393,33 @@ IF (.FALSE.) THEN
           End do
         END IF
 
-        MASS = 0.0d0
-        LOAD = 0.0d0
          BC => GetBC()
+         MASS = 0.0d0
          LOAD = 0.0d0
          GotIt = .FALSE.
 
          ! Does not necessarily need to be found...
          IF ( ASSOCIATED(BC) ) THEN
-            LOAD(1,1:n) = GetReal( BC, FabricName, GotIt )
+           ! Different if we only have one component
+           IF (STDOFs.EQ.1) THEN
+             LOAD(1,1:n) = GetReal( BC, FabricName, GotIt )
+           ELSE
+             DO i=1,STDOFs
+               LOAD(1,i:i + n * STDOFs:STDOFs ) = GetReal( BC, ComponentName(FabricName, i),&
+                                                           GotIt )
+             END DO
+           END IF
          END IF
 
          MASS = 0.0d0
-         CALL LocalMatrixBoundary(  STIFF, FORCE, LOAD(1,1:n), &
-                              Element, n, ParentElement, n1, Velocity,MeshVelocity, GotIt )
+         CALL LocalMatrixBoundary(  STIFF, FORCE, LOAD(1,1:n * STDOFs), &
+                              Element, n, STDOFs, ParentElement, n1, Velocity,MeshVelocity, GotIt )
 
 
       IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
         CALL DefaultUpdateEquations( STIFF, FORCE )
       END DO
-  END IF
       CALL DefaultFinishAssembly()
-      CALL DefaultDirichletBCs()
 
 !------------------------------------------------------------------------------
       CALL Info( SolverName, 'Set boundaries done', Level=4 )
@@ -466,7 +471,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 ! Inputs and Outputs
 !------------------------------------------------------------------------------
-      REAL(KIND=dp), Target :: STIFF(:,:),MASS(:,:)
+      REAL(KIND=dp), Target, INTENT(INOUT) :: STIFF(:,:),MASS(:,:)
       REAL(KIND=dp) :: LOAD(:,:), NodalVelo(:,:),NodMeshVel(:,:)
       REAL(KIND=dp), DIMENSION(:) :: FORCE, NodalFabric
 
@@ -604,31 +609,34 @@ CONTAINS
         ! at each point too.
         DO p=1,nd
           DO q=1,nd
-            LocalMass => MASS(SpectralDim*(p - 1) + 1:SpectralDim * p,&
-                              SpectralDim*(q - 1) + 1:SpectralDim * q)
-            LocalStiff => Stiff(SpectralDim*(p - 1) + 1:SpectralDim * p,&
-                                SpectralDim*(q - 1) + 1:SpectralDim * q)
+            i = SpectralDim * (p -1) + 1
+            j = SpectralDim * (q -1) + 1
+            LocalMass => MASS(i:i + SpectralDim, j:j + SpectralDim)
+            LocalStiff => Stiff(i:i + SpectralDim, j:j + SpectralDim)
+
             ! Loop over basis functions (of both unknowns and weights):
             ! ---------------------------------------------------------
-            DO C1=1,SpectralDim
-              DO C2=1,SpectralDim
+            DO i=1,SpectralDim
+              ! Advection terms:
+              ! ----------------
+              A = 0.0_dp
+              DO k=1,dim
+                A = A - Velo(k) * Basis(q) * dBasisdx(p,k)
+              END DO
+              LocalStiff( i,i ) = LocalStiff( i,i ) + s * A
+              M = Basis(p) * Basis(q)
+              LocalMass( i,i )  = LocalMass( i,i )  + s * M
+
+              DO j=1,SpectralDim
                 A = 0.0_dp
-                M = Basis(p) * Basis(q)
 
                 ! Reaction term:
                 ! ----------------
-                A = A - DCDt(C1, C2) * Basis(q) * Basis(p)
-
-                ! Advection terms:
-                ! ----------------
-                DO j=1,dim
-                  A = A - Velo(j) * Basis(q) * dBasisdx(p,j)
-                END DO
+                A = A - DCDt(i, j) * Basis(q) * Basis(p)
 
                 ! Add nodal matrix to element matrix:
                 !  -----------------------------------
-                LocalMass( C1,C2 )  = LocalMass( C1,C2 )  + s * M
-                LocalStiff( C1,C2 ) = LocalStiff( C1,C2 ) + s * A
+                LocalStiff( i,j ) = LocalStiff( i,j ) + s * A
               END DO
             END DO
           END DO
@@ -679,10 +687,11 @@ CONTAINS
 
 
 !------------------------------------------------------------------------------
-      SUBROUTINE LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velo,MeshVelo )
+      SUBROUTINE LocalJumps( STIFF,Edge,n,SpectralDim,LeftParent,n1,RightParent,n2,Velo,MeshVelo )
 !------------------------------------------------------------------------------
-      REAL(KIND=dp) :: STIFF(:,:), Velo(:,:),MeshVelo(:,:)
-      INTEGER :: n,n1,n2
+      REAL(KIND=dp), TARGET :: STIFF(:,:)
+      REAL(KIND=dp) :: Velo(:,:),MeshVelo(:,:)
+      INTEGER :: n,n1,n2,SpectralDim
       TYPE(Element_t), POINTER :: Edge, LeftParent, RightParent
 !------------------------------------------------------------------------------
       REAL(KIND=dp) :: EdgeBasis(n), EdgedBasisdx(n,3), EdgeddBasisddx(n,3,3)
@@ -694,6 +703,7 @@ CONTAINS
       INTEGER :: i, j, p, q, dim, t, nEdge, nParent
       TYPE(GaussIntegrationPoints_t) :: IntegStuff
       REAL(KIND=dp) :: hE, Normal(3), cu(3), LeftOut(3)
+      REAL(KIND=dp), POINTER :: LocalStiff(:, :)
 
       TYPE(Nodes_t) :: EdgeNodes, LeftParentNodes, RightParentNodes
 
@@ -757,10 +767,14 @@ CONTAINS
         END DO
         Udotn = SUM( Normal * cu )
 
-        DO p=1,n1+n2
-          DO q=1,n1+n2
-            STIFF(p,q) = STIFF(p,q) + s * Udotn * Average(q) * Jump(p)
-            STIFF(p,q) = STIFF(p,q) + s * ABS(Udotn)/2 * Jump(q) * Jump(p)
+        DO i = 1,SpectralDim
+          LocalStiff => STIFF(i:i + (n1 + n2) * SpectralDim:SpectralDim,&
+                              i:i + (n1 + n2) * SpectralDim:SpectralDim)
+          DO p=1,n1+n2
+            DO q=1,n1+n2
+              STIFF(p,q) = STIFF(p,q) + s * Udotn * Average(q) * Jump(p)
+              STIFF(p,q) = STIFF(p,q) + s * ABS(Udotn)/2 * Jump(q) * Jump(p)
+            END DO
           END DO
         END DO
       END DO
@@ -771,21 +785,23 @@ CONTAINS
 
 !------------------------------------------------------------------------------
       SUBROUTINE LocalMatrixBoundary( STIFF, FORCE, LOAD, &
-          Element, n, ParentElement, np, Velo,MeshVelo, InFlowBC )
+          Element, n, SpectralDim, ParentElement, np, Velo,MeshVelo, InFlowBC )
 !------------------------------------------------------------------------------
-      REAL(KIND=dp) :: STIFF(:,:),  FORCE(:), LOAD(:), Velo(:,:),MeshVelo(:,:)
-      INTEGER :: n, np
+      REAL(KIND=dp), TARGET :: STIFF(:,:),  FORCE(:)
+      REAL(KIND=dp) :: LOAD(:), Velo(:,:),MeshVelo(:,:)
+      INTEGER :: n, np, spectraldim
       LOGICAL :: InFlowBC
       TYPE(Element_t), POINTER :: Element, ParentElement
 !------------------------------------------------------------------------------
       REAL(KIND=dp) :: Basis(n), dBasisdx(n,3), ddBasisddx(n,3,3)
       REAL(KIND=dp) :: ParentBasis(np), ParentdBasisdx(np,3), ParentddBasisddx(np,3,3)
+      REAL(KIND=dp) :: Normal(3), g, L, Udotn, UdotnA, cu(3), detJ,S
+
       INTEGER :: i,j,p,q,t,dim
 
-      REAL(KIND=dp) :: Normal(3), g, L, Udotn, UdotnA, cu(3), detJ,U,V,W,S
       LOGICAL :: Stat
-      TYPE(GaussIntegrationPoints_t) :: IntegStuff
 
+      TYPE(GaussIntegrationPoints_t) :: IP
       TYPE(Nodes_t) :: Nodes, ParentNodes
       SAVE Nodes, ParentNodes
 !------------------------------------------------------------------------------
@@ -798,22 +814,18 @@ CONTAINS
 
       ! Numerical integration:
       !-----------------------
-      IntegStuff = GaussPoints( Element )
-!
-! Compute the average velocity.dot.Normal        
-!        
-      UdotnA = 0.0   
-      DO t=1,IntegStuff % n
-        U = IntegStuff % u(t)
-        V = IntegStuff % v(t)
-        W = IntegStuff % w(t)
-        S = IntegStuff % s(t)
+      IP = GaussPoints( Element )
 
-        Normal = NormalVector( Element, Nodes, U, V, .TRUE. ) 
+      ! Compute the average velocity.dot.Normal        
+      UdotnA = 0.0   
+      DO t=1,IP % n
+        S = IP % s(t)
+
+        Normal = NormalVector( Element, Nodes, IP % U(t), IP % V(t), .TRUE. ) 
 
         ! Basis function values & derivatives at the integration point:
         ! -------------------------------------------------------------
-        stat = ElementInfo( Element, Nodes, U, V, W, detJ, &
+        stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), IP % W(t), detJ, &
                Basis, dBasisdx, ddBasisddx, .FALSE. )
         S = S * detJ
         cu = 0.0d0
@@ -821,42 +833,46 @@ CONTAINS
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
         END DO
         UdotnA = UdotnA + s*SUM( Normal * cu )
-
       END DO
 
-      DO t=1,IntegStuff % n
-        U = IntegStuff % u(t)
-        V = IntegStuff % v(t)
-        W = IntegStuff % w(t)
-        S = IntegStuff % s(t)
+      ! Now switch to the actual integration
+      DO t=1,IP % n
+        S = IP % s(t)
 
-        Normal = NormalVector( Element, Nodes, U, V, .TRUE. ) 
+        Normal = NormalVector( Element, Nodes, IP % U(t), IP % V(t), .TRUE. ) 
 
         ! Basis function values & derivatives at the integration point:
         ! -------------------------------------------------------------
-        stat = ElementInfo( Element, Nodes, U, V, W, detJ, &
+        stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), IP % W(t), detJ, &
                 Basis, dBasisdx, ddBasisddx, .FALSE. )
         S = S * detJ
 
-        CALL FindParentUVW( Element, n, ParentElement, np, U, V, W, Basis )
-        stat = ElementInfo( ParentElement, ParentNodes, U, V, W, &
+        CALL FindParentUVW( Element, n, ParentElement, np, IP % U(t), IP % V(t), IP % W(t), Basis )
+        stat = ElementInfo( ParentElement, ParentNodes, &
+            IP % U(t), IP % V(t), IP % W(t), &
             detJ,  ParentBasis, ParentdBasisdx, ParentddBasisddx, .FALSE. )
-
-        L = SUM( LOAD(1:n) * Basis(1:n) )
+        
+        ! Calculate the normal component of the velocity
         cu = 0.0d0
         DO i=1,dim
-           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
+          cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
         END DO
         Udotn = SUM( Normal * cu )
 
+        ! Now go through each component
         DO p = 1,np
-          IF (InFlowBC .And. (UdotnA < 0.) ) THEN
-            FORCE(p) = FORCE(p) - s * Udotn*L*ParentBasis(p)
-          ELSE
-            DO q=1,np
-              STIFF(p,q) = STIFF(p,q) + s*Udotn*ParentBasis(q)*ParentBasis(p)
-            END DO
-          END IF
+          DO j=1,SpectralDim
+            L = SUM( LOAD(j:j + n * SpectralDim:SpectralDim ) * Basis(1:n) )
+            IF (InFlowBC .And. (UdotnA < 0.) ) THEN
+              FORCE(SpectralDim * (p - 1) + j) = FORCE(SpectralDim * (p - 1) + j) - s * Udotn*L*ParentBasis(p)
+            ELSE
+              DO q=1,np
+                STIFF(SpectralDim * (p - 1) + j, SpectralDim * (q - 1) + j) = &
+                    STIFF(SpectralDim * (p - 1) + j, SpectralDim * (q - 1) + j) &
+                    + s*Udotn*ParentBasis(q)*ParentBasis(p)
+              END DO
+            END IF
+          END DO
         END DO
       END DO
 !------------------------------------------------------------------------------

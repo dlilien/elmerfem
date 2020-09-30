@@ -60,7 +60,7 @@ Initial Condition 1
   SpectralFabric 6 = Real 0.0
 
   AIFlow 1 = Real 0.0              ! u_1
-  AIFlow 2 = Real 0.0              ! u_2
+  AIFlow 2 = Real -2.0e-1              ! u_2
   AIFlow 3 = Real 0.0              ! p for 2D u_3 for 3D
 
   Temperature = Real -10.0
