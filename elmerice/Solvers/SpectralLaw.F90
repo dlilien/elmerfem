@@ -128,15 +128,15 @@
         DCDt = 0.0
         ! No guarantees on previous values, so leave the previous line
 
-        DO i = 1,ProbDim - 1
-           DCDt(i, i) = -2
-           DCDt(i, i + 1) = 1
-           DCDt(i + 1, i) = 1
-        END DO
+        ! DO i = 1,ProbDim - 1
+        !    DCDt(i, i) = -2
+        !    DCDt(i, i + 1) = 1
+        !    DCDt(i + 1, i) = 1
+        ! END DO
 
         ! Zero flux at the ends
-        DCDt(1,1) = -1.0
-        DCDt(ProbDim, ProbDim) = -1.0
+        ! DCDt(1,1) = -1.0
+        ! DCDt(ProbDim, ProbDim) = -1.0
       END SUBROUTINE SpectralModel
 
 

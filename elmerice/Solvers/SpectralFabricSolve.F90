@@ -73,19 +73,21 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
       TYPE(Variable_t), POINTER :: &
            FlowVariable, EigenFabricVariable, MeshVeloVariable, &
-           TimeVar
+           TimeVar, FabricVariable
 
       REAL(KIND=dp), POINTER :: &
            FlowValues(:), EigenFabricValues(:), &
-           MeshVeloValues(:), Solution(:)
+           MeshVeloValues(:), FabricValues(:), &
+           PrevFabric(:),CurrFabric(:),TempFabVal(:),&
+           Solution(:), Ref(:)
 
       INTEGER, POINTER :: Perm(:),NodeIndexes(:), &
-           FlowPerm(:), MeshVeloPerm(:), EigenFabricPerm(:)
+           FlowPerm(:), MeshVeloPerm(:), EigenFabricPerm(:), FabricPerm(:)
 
       INTEGER :: body_id,bf_id,eq_id, Indexes(128),SpectralOrder,&
                  old_body = -1, NewtonIter,NonlinearIter, Node,&
                  dim,n1,n2,i,j,k,l,n,nd,t,iter,NDeg,STDOFs,LocalNodes,istat,&
-                 comp
+                 comp, SpectralDim
 
       REAL(KIND=dp) :: rho, lambda, A1plusA2, Bu, Bv, Bw, &
            a2(6), ai(3), Angle(3), RM(3,3), &
@@ -108,8 +110,8 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
       SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
            AllocationsDone, rho, lambda, Velocity, &
            MeshVelocity, old_body, dim, comp, SolverName, &
-           SpectralOrder, LocalFabric, &
-           OverlapMatrix
+           CurrFabric, TempFabVal, PrevFabric, &
+           SpectralOrder, OverlapMatrix, LocalFabric
 
 #ifdef USE_ISO_C_BINDINGS
       REAL(KIND=dp) :: at, at0
@@ -133,23 +135,14 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
       IF ( .NOT. ASSOCIATED( Solver % Matrix ) ) RETURN
 
-      Solution => Solver % Variable % Values
       Perm => Solver % Variable % Perm
       STDOFs   =  Solver % Variable % DOFs
-      FabricName   =  Solver % Variable % Name
 
       SolverParams => GetSolverParams()
 
       SpectralOrder = ListGetInteger( SolverParams,'Fabric Order', &
           GotIt,UnFoundFatal=.TRUE. )
-      IF (STDOFs .NE. (SpectralOrder * (SpectralOrder + 1)) / 2) THEN
-          WRITE(Message,'(A,I4,A,I4)') 'Fabric variable order ', &
-              STDOFs, ' does not match order ', SpectralOrder
-          CALL FATAL(SolverName, message)
-      END IF
-      WRITE(Message,'(A,I4,A,I4)') 'Fabric dimension is', &
-            STDOFs, ', matching order ', SpectralOrder
-      CALL INFO(SolverName, Message , level = 20)
+      SpectralDim = SpectralOrder * (SpectralOrder + 1) / 2
 
       FlowName = ListGetString( SolverParams, 'Flow Solution Name', &
             GotIt,UnFoundFatal=.FALSE. )
@@ -164,6 +157,26 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
         CALL INFO(SolverName, Message , level = 20)
       ELSE
         WRITE(Message,'(A,A)') 'Flow variable not found:', FlowName
+        CALL FATAL(SolverName, message)
+      END IF
+
+      FabricName = ListGetString( SolverParams, 'Fabric Name', &
+            GotIt,UnFoundFatal=.FALSE. )
+      IF (.NOT.GotIt) THEN
+          FabricName = 'SpectralFabric'
+      END IF
+      FabricVariable => VariableGet( Solver % Mesh % Variables, FabricName)
+      IF ( ASSOCIATED( FabricVariable ) ) THEN
+        FabricPerm    => FabricVariable % Perm
+        FabricValues  => FabricVariable % Values
+        WRITE(Message,'(A,A)') 'Fabric variable = ', FabricName
+        CALL INFO(SolverName, Message , level = 20)
+      ELSE
+        WRITE(Message,'(A,A)') 'Fabric variable not found:', FabricName
+        CALL FATAL(SolverName, message)
+      END IF
+      IF (SpectralDim .NE. FabricVariable % DOFs) THEN
+        WRITE(Message,*) 'Fabric DOF mismatch'
         CALL FATAL(SolverName, message)
       END IF
 
@@ -184,7 +197,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
                                        
 !------------------------------------------------------------------------------
       StiffMatrix => Solver % Matrix
-      Unorm = SQRT( SUM( Solution**2 ) / SIZE(Solution) )
+      Unorm = SQRT( SUM( FabricValues**2 ) / SIZE(FabricValues) )
 !------------------------------------------------------------------------------
 !     Allocate some permanent storage, this is done first time only
 !------------------------------------------------------------------------------
@@ -196,9 +209,10 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
        IF ( AllocationsDone ) THEN
          DEALLOCATE( Force, &
                      Velocity,MeshVelocity, &
-                     MASS,STIFF,      &
-                     LOAD, Alpha, Beta, &
-                     LocalFabric)
+                     MASS,STIFF,&
+                     LOAD, Alpha, Beta,&
+                     LocalFabric,&
+                     CurrFabric, TempFabVal )
        END IF
 
        ALLOCATE( Force( 2*STDOFs*N ), &
@@ -206,13 +220,39 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
                  MASS( 2*STDOFs*N,2*STDOFs*N ),  &
                  STIFF( 2*STDOFs*N,2*STDOFs*N ),  &
                  LOAD( 4,N ), Alpha( 3,N ), Beta( N ), &
-                 LocalFabric(N * STDOFs), &
+                 CurrFabric( SpectralDim*SIZE(Solver % Variable % Values)), &
+                 TempFabVal( SIZE(FabricValues)), &
+                 LocalFabric(N * SpectralDim), &	
                  STAT=istat )
 
 
        IF ( istat /= 0 ) THEN
          CALL FATAL(SolverName, 'Memory allocation error.' )
        END IF
+
+       CurrFabric = 0.
+       TempFabVal = 0.
+       IF ( TransientSimulation ) THEN
+          IF (AllocationsDone ) DEALLOCATE (PrevFabric)
+          ALLOCATE( PrevFabric( SpectralDim*SIZE(Solver % Variable % Values)) )
+         PrevFabric = 0.
+       END IF
+
+       DO i=1,Solver % NumberOFActiveElements
+          CurrentElement => GetActiveElement(i)   
+          n = GetElementDOFs( Indexes )
+          n = GetElementNOFNodes()
+          NodeIndexes => CurrentElement % NodeIndexes
+          Indexes(1:n) = Solver % Variable % Perm( Indexes(1:n) )
+          DO COMP=1,SpectralDim
+            IF ( TransientSimulation ) THEN
+               PrevFabric(SpectralDim*(Indexes(1:n)-1)+COMP) = &
+                   FabricValues(SpectralDim*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+            END IF
+               CurrFabric(SpectralDim*(Indexes(1:n)-1)+COMP) = &
+                   FabricValues(SpectralDim*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+          END DO
+       END DO
 
        AllocationsDone = .TRUE.
       END IF
@@ -221,6 +261,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
         TimeVar => VariableGet( Solver % Mesh % Variables, 'Time' )
         IF ( SaveTime /= TimeVar % Values(1) ) THEN
            SaveTime = TimeVar % Values(1)
+           PrevFabric = CurrFabric
         END IF
       END IF
 
@@ -257,80 +298,81 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
         PrevUNorm = UNorm
        
-        CALL DefaultInitialize()
-
-!------------------------------------------------------------------------------
-        DO t=1,Solver % NumberOFActiveElements
-!------------------------------------------------------------------------------
-
-            IF ( RealTime() - at0 > 1.0 ) THEN
-              WRITE(Message,'(a,i3,a)' ) '   Assembly: ', INT(100.0 - 100.0 * &
-               (Solver % NumberOfActiveElements-t) / &
-                  (1.0*Solver % NumberOfActiveElements)), ' % done'
-                           
-              CALL Info(SolverName, Message, Level=5 )
-              at0 = RealTime()
+        DO COMP=1,SpectralDim
+            Solver % Variable % Values = CurrFabric( COMP::SpectralDim )
+            IF ( TransientSimulation ) THEN
+              Solver % Variable % PrevValues(:,1) = PrevFabric( COMP::SpectralDim )
             END IF
 
-         CurrentElement => GetActiveElement(t)
-         CALL GetElementNodes( ElementNodes )
-         n = GetElementNOFNodes()
-         nd = GetElementDOFs( Indexes )
-         NodeIndexes => CurrentElement % NodeIndexes
-         Material => GetMaterial()
-         body_id = CurrentElement % BodyId
+            CALL DefaultInitialize()
+    !------------------------------------------------------------------------------
+            DO t=1,Solver % NumberOFActiveElements
+    !------------------------------------------------------------------------------
 
+                IF ( RealTime() - at0 > 1.0 ) THEN
+                  WRITE(Message,'(a,i3,a)' ) '   Assembly: ', INT(100.0 - 100.0 * &
+                   (Solver % NumberOfActiveElements-t) / &
+                      (1.0*Solver % NumberOfActiveElements)), ' % done'
+                               
+                  CALL Info(SolverName, Message, Level=5 )
+                  at0 = RealTime()
+                END IF
 
-!------------------------------------------------------------------------------
-!        Get element local stiffness & mass matrices
-!------------------------------------------------------------------------------
-         DO i=1,STDOFs
-            LocalFabric(((i - 1) * n + 1):i * n) = Solution(STDOFs*(&
-                Solver % Variable % Perm(Indexes(1:n))-1) + i )
-         END DO
+             CurrentElement => GetActiveElement(t)
+             CALL GetElementNodes( ElementNodes )
+             n = GetElementDOFs( Indexes )
+             n = GetElementNOFNodes()
+             NodeIndexes => CurrentElement % NodeIndexes
+             Material => GetMaterial()
+             body_id = CurrentElement % BodyId
 
-         k = FlowVariable % DOFs
-         Velocity = 0.0d0
-         DO i=1,k
-            Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
-         END DO
+             DO i=1,SpectralDim
+               LocalFabric(i::SpectralDim) = CurrFabric(SpectralDim*(&
+                 Perm(Indexes(1:n)) - 1) + i )
+             END DO
 
-         MeshVelocity=0._dp
-         IF (ASSOCIATED(MeshVeloVariable)) Then
-           k = MeshVeloVariable % DOFs
-           DO i=1,k
-              MeshVelocity(i,1:n) = MeshVeloValues(k*(MeshVeloPerm(NodeIndexes)-1)+i)
-           END DO
-         EndIF
+    !------------------------------------------------------------------------------
+    !        Get element local stiffness & mass matrices
+    !------------------------------------------------------------------------------
+             k = FlowVariable % DOFs
+             Velocity = 0.0d0
+             DO i=1,k
+                Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
+             END DO
 
-         CALL LocalMatrix(MASS, STIFF, FORCE, LOAD, LocalFabric, Velocity, &
-           MeshVelocity, CurrentElement, n, nd, ElementNodes, rho, &
-           lambda, SpectralOrder, STDOFs, OverlapMatrix)
+             MeshVelocity=0._dp
+             IF (ASSOCIATED(MeshVeloVariable)) Then
+               k = MeshVeloVariable % DOFs
+               DO i=1,k
+                  MeshVelocity(i,1:n) = MeshVeloValues(k*(MeshVeloPerm(NodeIndexes)-1)+i)
+               END DO
+             EndIF
 
-!------------------------------------------------------------------------------
-!        Update global matrices from local matrices 
-!------------------------------------------------------------------------------
-         IF ( TransientSimulation )  CALL Default1stOrderTime(MASS,STIFF,FORCE)
-         CALL DefaultUpdateEquations( STIFF, FORCE )
-!------------------------------------------------------------------------------
-      END DO
-      CALL Info( SolverName, 'Assembly done', Level=4 )
-!------------------------------------------------------------------------------
-!------------------------------------------------------------------------------
-!     Assembly of the edge terms
-!------------------------------------------------------------------------------
-!
-!3D => Edges => Faces
-      IF (dim.eq.3) THEN 
-        CALL FATAL(SolverName, "This solver cannot actually handle 3d...")
-      ELSE
-        DO t=1,Solver % Mesh % NumberOfEdges
-          Edge => Solver % Mesh % Edges(t)
-          IF ( .NOT. ActiveBoundaryElement(Edge) ) CYCLE
+             CALL LocalMatrix(MASS, STIFF, FORCE, LOAD, Comp, LocalFabric, Velocity, &
+               MeshVelocity, CurrentElement, n, ElementNodes, rho, &
+               lambda, SpectralOrder, SpectralDim, OverlapMatrix)
+
+    !------------------------------------------------------------------------------
+    !        Update global matrices from local matrices 
+    !------------------------------------------------------------------------------
+             IF ( TransientSimulation )  CALL Default1stOrderTime(MASS,STIFF,FORCE)
+             CALL DefaultUpdateEquations( STIFF, FORCE )
+    !------------------------------------------------------------------------------
+          END DO
+          CALL Info( SolverName, 'Assembly done', Level=4 )
+    !------------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
+    !     Assembly of the edge terms
+    !------------------------------------------------------------------------------
+    !3D => Edges => Faces
+      If (dim.eq.3) then 
+      DO t=1,Solver % Mesh % NumberOfFaces
+         Edge => Solver % Mesh % Faces(t)
+         IF ( .NOT. ActiveBoundaryElement(Edge) ) CYCLE
        
-          LeftParent  => Edge % BoundaryInfo % Left
-          RightParent => Edge % BoundaryInfo % Right
-          IF ( ASSOCIATED(RightParent) .AND. ASSOCIATED(LeftParent) ) THEN
+         LeftParent  => Edge % BoundaryInfo % Left
+         RightParent => Edge % BoundaryInfo % Right
+         IF ( ASSOCIATED(RightParent) .AND. ASSOCIATED(LeftParent) ) THEN
             n  = GetElementNOFNodes( Edge )
             n1 = GetElementNOFNodes( LeftParent )
             n2 = GetElementNOFNodes( RightParent )
@@ -338,7 +380,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
             k = FlowVariable % DOFs
             Velocity = 0.0d0
             DO i=1,k
-              Velocity(i,1:n) = FlowValues(k*(FlowPerm(Edge % NodeIndexes(1:n))-1)+i)
+               Velocity(i,1:n) = FlowValues(k*(FlowPerm(Edge % NodeIndexes)-1)+i)
             END DO
 
      !-------------------mesh velo
@@ -353,8 +395,45 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
             FORCE = 0.0d0
             MASS  = 0.0d0
-            CALL LocalJumps( STIFF,Edge,n,STDOFs,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
-            
+            CALL LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
+            IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
+            CALL DefaultUpdateEquations( STIFF, FORCE, Edge )
+         END IF
+      END DO
+!
+!  2D
+      Else
+
+      DO t=1,Solver % Mesh % NumberOfEdges
+         Edge => Solver % Mesh % Edges(t)
+         IF ( .NOT. ActiveBoundaryElement(Edge) ) CYCLE
+       
+         LeftParent  => Edge % BoundaryInfo % Left
+         RightParent => Edge % BoundaryInfo % Right
+         IF ( ASSOCIATED(RightParent) .AND. ASSOCIATED(LeftParent) ) THEN
+            n  = GetElementNOFNodes( Edge )
+            n1 = GetElementNOFNodes( LeftParent )
+            n2 = GetElementNOFNodes( RightParent )
+
+            k = FlowVariable % DOFs
+            Velocity = 0.0d0
+            DO i=1,k
+               Velocity(i,1:n) = FlowValues(k*(FlowPerm(Edge % NodeIndexes(1:n))-1)+i)
+            END DO
+
+     !-------------------mesh velo
+         MeshVelocity=0._dp
+      IF ( ASSOCIATED( MeshVeloVariable ) ) THEN
+            k = MeshVeloVariable % DOFs
+            DO i=1,k
+               MeshVelocity(i,1:n) = MeshVeloValues(k*(MeshVeloPerm(Edge % NodeIndexes)-1)+i)
+            END DO
+      END IF
+     !--------------------------
+
+            FORCE = 0.0d0
+            MASS  = 0.0d0
+            CALL LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
             IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
             CALL DefaultUpdateEquations( STIFF, FORCE, Edge )
          END IF
@@ -363,81 +442,115 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
       END IF
 
       CALL DefaultFinishBulkAssembly()
-
 !------------------------------------------------------------------------------
 !     Loop over the boundary elements
-!         Cannot use DefaultDirichletBCs because of advection effects
 !------------------------------------------------------------------------------
       DO t = 1, Solver % Mesh % NumberOfBoundaryElements
 !------------------------------------------------------------------------------
-        Element => GetBoundaryElement(t)
-        IF( .NOT. ActiveBoundaryElement() )  CYCLE
-        IF( GetElementFamily(Element) == 1 ) CYCLE
 
-        ParentElement => Element % BoundaryInfo % Left
-        IF ( .NOT. ASSOCIATED( ParentElement ) ) &
+         Element => GetBoundaryElement(t)
+         IF( .NOT. ActiveBoundaryElement() )  CYCLE
+         IF( GetElementFamily(Element) == 1 ) CYCLE
+
+         ParentElement => Element % BoundaryInfo % Left
+         IF ( .NOT. ASSOCIATED( ParentElement ) ) &
             ParentElement => Element % BoundaryInfo % Right
           
-        n  = GetElementNOFNodes( Element )
-        n1 = GetElementNOFnodes( ParentElement )
+         n  = GetElementNOFNodes( Element )
+         n1 = GetElementNOFnodes( ParentElement )
        
-        k = FlowVariable % DOFs
-        Velocity = 0.0d0
+         k = FlowVariable % DOFs
+         Velocity = 0.0d0
+         DO i=1,k
+            Velocity(i,1:n) = FlowValues(k*(FlowPerm(Element % NodeIndexes(1:n))-1)+i)
+         END DO
+
+!-------------------mesh velo
+         MeshVelocity=0._dp
+      IF ( ASSOCIATED( MeshVeloVariable ) ) THEN
+        k = MeshVeloVariable % DOFs
         DO i=1,k
-          Velocity(i,1:n) = FlowValues(k*(FlowPerm(Element % NodeIndexes(1:n))-1)+i)
-        END DO
-        MeshVelocity=0._dp
-        IF ( ASSOCIATED( MeshVeloVariable ) ) THEN
-          k = MeshVeloVariable % DOFs
-          DO i=1,k
-            MeshVelocity(i,1:n) = MeshVeloValues(k*(MeshVeloPerm(Element % NodeIndexes)-1)+i)
-          End do
-        END IF
+         MeshVelocity(i,1:n) = MeshVeloValues(k*(MeshVeloPerm(Element % NodeIndexes)-1)+i)
+        End do
+      END IF
+!--------------------------
+
 
          BC => GetBC()
-         MASS = 0.0d0
          LOAD = 0.0d0
          GotIt = .FALSE.
-
-         ! Does not necessarily need to be found...
          IF ( ASSOCIATED(BC) ) THEN
-           ! Different if we only have one component
-           IF (STDOFs.EQ.1) THEN
-             LOAD(1,1:n) = GetReal( BC, FabricName, GotIt )
-           ELSE
-             DO i=1,STDOFs
-               LOAD(1,i:i + n * STDOFs:STDOFs ) = GetReal( BC, ComponentName(FabricName, i),&
-                                                           GotIt )
-             END DO
-           END IF
+            LOAD(1,1:n) = GetReal( BC, ComponentName(FabricName, Comp) , GotIt )
          END IF
 
          MASS = 0.0d0
-         CALL LocalMatrixBoundary(  STIFF, FORCE, LOAD(1,1:n * STDOFs), &
-                              Element, n, STDOFs, ParentElement, n1, Velocity,MeshVelocity, GotIt )
+         CALL LocalMatrixBoundary(  STIFF, FORCE, LOAD(1,1:n), &
+                              Element, n, ParentElement, n1, Velocity,MeshVelocity, GotIt )
 
-
-      IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
-        CALL DefaultUpdateEquations( STIFF, FORCE )
+         IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
+         CALL DefaultUpdateEquations( STIFF, FORCE )
       END DO
-      CALL DefaultFinishAssembly()
 
+      CALL DefaultFinishAssembly()
 !------------------------------------------------------------------------------
-      CALL Info( SolverName, 'Set boundaries done', Level=4 )
+      CALL Info( 'FabricSolve', 'Set boundaries done', Level=4 )
 
 !------------------------------------------------------------------------------
 !     Solve the system and check for convergence
 !------------------------------------------------------------------------------
       Unorm = DefaultSolve()
-
-      WRITE(Message,*) 'solve done', minval( solver % variable % values), maxval( Solver % variable % values)
+      WRITE(Message,*) 'Solve Done', minval( solver % variable % values), maxval( Solver % variable % values)
       CALL Info( SolverName, Message, Level=4 )
       
+      n1 = Solver % Mesh % NumberOfNodes
+      ALLOCATE( Ref(n1) )
+      Ref = 0
+      TempFabVal(COMP::SpectralDim ) = 0. !fab
+      
+      DO t=1,Solver % NumberOfActiveElements
+         Element => GetActiveElement(t) 
+         n = GetElementDOFs( Indexes )
+         n = GetElementNOFNodes()
+         
+         DO i=1,n
+            k = Element % NodeIndexes(i)
+            TempFabVal( SpectralDim*(FabricPerm(k)-1) + COMP ) =    & 
+            TempFabVal( SpectralDim*(FabricPerm(k)-1) + COMP ) + &
+            Solver % Variable % Values(Perm(Indexes(i)) )
+            FabricValues( SpectralDim*(FabricPerm(k)-1) + COMP ) = &
+                          TempFabVal(SpectralDim*(FabricPerm(k)-1) + COMP ) 
+            Ref(k) = Ref(k) + 1
+         END DO
+      END DO
+
+        DO i=1,n1
+          j=FabricPerm(i)
+          IF (j < 1) CYCLE
+          IF ( Ref(i) > 0 ) THEN
+            FabricValues( SpectralDim*(j-1)+COMP ) = &
+                   FabricValues( SpectralDim*(j-1)+COMP ) / Ref(i)
+          END IF
+        END DO
+        DEALLOCATE( Ref )
+      END DO ! End DO Comp
+
       ! Need to post-process every node to make sure we are normalized
       DO i=1,Solver % Mesh % NumberOfNodes
-        Node = Perm(i)
-        CALL PostProcessFabric(Solution(STDOFS*(Node-1) + 1:STDOFS*Node), STDOFs)
+        CALL PostProcessFabric(FabricValues(SpectralDim*(i - 1) + 1:SpectralDim*i), SpectralDim)
       END DO
+
+      ! And finally need to reset the current fabric
+       DO i=1,Solver % NumberOFActiveElements
+          CurrentElement => GetActiveElement(i)   
+          n = GetElementDOFs( Indexes )
+          n = GetElementNOFNodes()
+          NodeIndexes => CurrentElement % NodeIndexes
+          Indexes(1:n) = Perm( Indexes(1:n) )
+          DO COMP=1,SpectralDim
+            CurrFabric(SpectralDim*(Indexes(1:n)-1)+COMP) = &
+                        FabricValues(SpectralDim*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+          END DO
+       END DO
 
       ! Normalization will have altered the norm, so recalculate and override
       Unorm = SQRT( SUM( Solution**2 ) / SIZE(Solution) )
@@ -466,19 +579,19 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 CONTAINS
 
 !------------------------------------------------------------------------------
-      SUBROUTINE LocalMatrix(MASS, STIFF, FORCE, LOAD, NodalFabric, & 
-          NodalVelo, NodMeshVel, Element, n, nd, Nodes, rho, lambda, SpectralOrder,&
+      SUBROUTINE LocalMatrix(MASS, STIFF, FORCE, LOAD, Comp, LocalFabric,& 
+          NodalVelo, NodMeshVel, Element, n, Nodes, rho, lambda, SpectralOrder,&
           SpectralDim, OverlapMatrix)
 !------------------------------------------------------------------------------
 ! Inputs and Outputs
 !------------------------------------------------------------------------------
       REAL(KIND=dp), Target, INTENT(INOUT) :: STIFF(:,:),MASS(:,:)
       REAL(KIND=dp) :: LOAD(:,:), NodalVelo(:,:),NodMeshVel(:,:)
-      REAL(KIND=dp), DIMENSION(:) :: FORCE, NodalFabric
+      REAL(KIND=dp), DIMENSION(:) :: FORCE, LocalFabric
 
       TYPE(Nodes_t) :: Nodes
       TYPE(Element_t) :: Element
-      INTEGER :: n, nd, Comp
+      INTEGER :: n, Comp
 !------------------------------------------------------------------------------
 !    Local variables
 !------------------------------------------------------------------------------
@@ -493,11 +606,11 @@ CONTAINS
       INTEGER :: i,j,k,p,q,t,dim,ind(3),&
           SpectralOrder,SPectralDim, C1, C2
 
-      REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), C44,C55,C66
-      REAL(KIND=dp) :: Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
+      REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6)
+      REAL(KIND=dp) :: Velo(3),StrainR(6),Spin(3),SD(6)
 
       REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
-      REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),&
+      REAL(KIND=dp) :: ap(3),Spin1(3,3),&
         ThisNodeFabric(SpectralDim)
       LOGICAL :: CSymmetry, Fond
               
@@ -600,47 +713,44 @@ CONTAINS
            Velo(i) = SUM( Basis(1:n) * (NodalVelo(i,1:n) - NodMeshVel(i,1:n)) )
         END DO
 
+        ! Need the fabric vector
+        ThisNodeFabric = 0.0
+        DO i = 1,STDOFs
+          ThisNodeFabric(i) = SUM(Basis(1:n) * LocalFabric(i::STDOFs))
+        END DO
+
 
         !    Plug in Nicholas's model
         CALL SpectralModel(STDOFs, SpectralOrder,ThisNodeFabric, StrainRate, Spin1, &
                           OverlapMatrix, DCDt)
 
-        ! I think we need two extra loops here, since we need to handle the
-        ! extra dimensions. And we still need to do all the basis functions
-        ! at each point too.
-        DO p=1,nd
-          DO q=1,nd
-            i = SpectralDim * (p -1) + 1
-            j = SpectralDim * (q -1) + 1
-            LocalMass => MASS(i:i + SpectralDim - 1, j:j + SpectralDim - 1)
-            LocalStiff => Stiff(i:i + SpectralDim - 1, j:j + SpectralDim - 1)
+                      
+!     Loop over basis functions (of both unknowns and weights):
+!     ---------------------------------------------------------
+      DO p=1,n
+         DO q=1,n
+            A = 0.0d0
+            M = Basis(p) * Basis(q)
+!
+!           Reaction terms:
+!           ---------------
+            ! A = A - DCDt(p,q) * Basis(q) * Basis(p)
 
-            ! Loop over basis functions (of both unknowns and weights):
-            ! ---------------------------------------------------------
-            DO i=1,SpectralDim
-              ! Advection terms:
-              ! ----------------
-              A = 0.0_dp
-              DO k=1,dim
-                A = A - Velo(k) * Basis(q) * dBasisdx(p,k)
-              END DO
-              LocalStiff( i,i ) = LocalStiff( i,i ) + s * A
-              M = Basis(p) * Basis(q)
-              LocalMass( i,i )  = LocalMass( i,i )  + s * M
-
-              DO j=1,SpectralDim
-                A = 0.0_dp
-
-                ! Reaction term:
-                ! ----------------
-                A = A - DCDt(i, j) * Basis(q) * Basis(p)
-
-                ! Add nodal matrix to element matrix:
-                !  -----------------------------------
-                LocalStiff( i,j ) = LocalStiff( i,j ) + s * A
-              END DO
+            !
+            ! Advection terms:
+            ! ----------------
+            DO j=1,dim
+               A = A - Velo(j) * Basis(q) * dBasisdx(p,j)
             END DO
-          END DO
+
+!           Add nodal matrix to element matrix:
+!           -----------------------------------
+            MASS( p,q )  = MASS( p,q )  + s * M
+            STIFF( p,q ) = STIFF( p,q ) + s * A
+         END DO
+
+
+
 
 
         ! The righthand side...is zero:
@@ -686,13 +796,11 @@ CONTAINS
       END SUBROUTINE FindParentUVW
 !------------------------------------------------------------------------------      
 
-
 !------------------------------------------------------------------------------
-      SUBROUTINE LocalJumps( STIFF,Edge,n,SpectralDim,LeftParent,n1,RightParent,n2,Velo,MeshVelo )
+    SUBROUTINE LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velo,MeshVelo )
 !------------------------------------------------------------------------------
-      REAL(KIND=dp), TARGET :: STIFF(:,:)
-      REAL(KIND=dp) :: Velo(:,:),MeshVelo(:,:)
-      INTEGER :: n,n1,n2,SpectralDim
+      REAL(KIND=dp) :: STIFF(:,:), Velo(:,:),MeshVelo(:,:)
+      INTEGER :: n,n1,n2
       TYPE(Element_t), POINTER :: Edge, LeftParent, RightParent
 !------------------------------------------------------------------------------
       REAL(KIND=dp) :: EdgeBasis(n), EdgedBasisdx(n,3), EdgeddBasisddx(n,3,3)
@@ -704,7 +812,6 @@ CONTAINS
       INTEGER :: i, j, p, q, dim, t, nEdge, nParent
       TYPE(GaussIntegrationPoints_t) :: IntegStuff
       REAL(KIND=dp) :: hE, Normal(3), cu(3), LeftOut(3)
-      REAL(KIND=dp), POINTER :: LocalStiff(:, :)
 
       TYPE(Nodes_t) :: EdgeNodes, LeftParentNodes, RightParentNodes
 
@@ -768,116 +875,111 @@ CONTAINS
         END DO
         Udotn = SUM( Normal * cu )
 
-        DO i = 1,SpectralDim
-          LocalStiff => STIFF(i:i + (n1 + n2 - 1) * SpectralDim:SpectralDim,&
-                              i:i + (n1 + n2 - 1) * SpectralDim:SpectralDim)
-          DO p=1,n1+n2
-            DO q=1,n1+n2
-              STIFF(p,q) = STIFF(p,q) + s * Udotn * Average(q) * Jump(p)
-              STIFF(p,q) = STIFF(p,q) + s * ABS(Udotn)/2 * Jump(q) * Jump(p)
-            END DO
+        DO p=1,n1+n2
+          DO q=1,n1+n2
+            STIFF(p,q) = STIFF(p,q) + s * Udotn * Average(q) * Jump(p)
+            STIFF(p,q) = STIFF(p,q) + s * ABS(Udotn)/2 * Jump(q) * Jump(p)
           END DO
         END DO
-      END DO
+     END DO
 !------------------------------------------------------------------------------
-      END SUBROUTINE LocalJumps
+   END SUBROUTINE LocalJumps
 !------------------------------------------------------------------------------
 
 
+
 !------------------------------------------------------------------------------
-      SUBROUTINE LocalMatrixBoundary( STIFF, FORCE, LOAD, &
-          Element, n, SpectralDim, ParentElement, np, Velo,MeshVelo, InFlowBC )
+   SUBROUTINE LocalMatrixBoundary( STIFF, FORCE, LOAD, &
+        Element, n, ParentElement, np, Velo,MeshVelo, InFlowBC )
 !------------------------------------------------------------------------------
-      REAL(KIND=dp), TARGET :: STIFF(:,:),  FORCE(:)
-      REAL(KIND=dp) :: LOAD(:), Velo(:,:),MeshVelo(:,:)
-      INTEGER :: n, np, spectraldim
-      LOGICAL :: InFlowBC
-      TYPE(Element_t), POINTER :: Element, ParentElement
+     REAL(KIND=dp) :: STIFF(:,:),  FORCE(:), LOAD(:), Velo(:,:),MeshVelo(:,:)
+     INTEGER :: n, np
+     LOGICAL :: InFlowBC
+     TYPE(Element_t), POINTER :: Element, ParentElement
 !------------------------------------------------------------------------------
-      REAL(KIND=dp) :: Basis(n), dBasisdx(n,3), ddBasisddx(n,3,3)
-      REAL(KIND=dp) :: ParentBasis(np), ParentdBasisdx(np,3), ParentddBasisddx(np,3,3)
-      REAL(KIND=dp) :: Normal(3), g, L, Udotn, UdotnA, cu(3), detJ,S
+     REAL(KIND=dp) :: Basis(n), dBasisdx(n,3), ddBasisddx(n,3,3)
+     REAL(KIND=dp) :: ParentBasis(np), ParentdBasisdx(np,3), ParentddBasisddx(np,3,3)
+     INTEGER :: i,j,p,q,t,dim
 
-      INTEGER :: i,j,p,q,t,dim
+     REAL(KIND=dp) :: Normal(3), g, L, Udotn, UdotnA, cu(3), detJ,U,V,W,S
+     LOGICAL :: Stat
+     TYPE(GaussIntegrationPoints_t) :: IntegStuff
 
-      LOGICAL :: Stat
-
-      TYPE(GaussIntegrationPoints_t) :: IP
-      TYPE(Nodes_t) :: Nodes, ParentNodes
-      SAVE Nodes, ParentNodes
+     TYPE(Nodes_t) :: Nodes, ParentNodes
+     SAVE Nodes, ParentNodes
 !------------------------------------------------------------------------------
-      dim = CoordinateSystemDimension()
-      FORCE = 0.0d0
-      STIFF = 0.0d0
+     dim = CoordinateSystemDimension()
+     FORCE = 0.0d0
+     STIFF = 0.0d0
 
-      CALL GetElementNodes( Nodes, Element )
-      CALL GetElementNodes( ParentNodes, ParentElement )
+     CALL GetElementNodes( Nodes, Element )
+     CALL GetElementNodes( ParentNodes, ParentElement )
 
-      ! Numerical integration:
-      !-----------------------
-      IP = GaussPoints( Element )
+     ! Numerical integration:
+     !-----------------------
+     IntegStuff = GaussPoints( Element )
+!
+! Compute the average velocity.dot.Normal        
+!        
+     UdotnA = 0.0   
+     DO t=1,IntegStuff % n
+       U = IntegStuff % u(t)
+       V = IntegStuff % v(t)
+       W = IntegStuff % w(t)
+       S = IntegStuff % s(t)
 
-      ! Compute the average velocity.dot.Normal        
-      UdotnA = 0.0   
-      DO t=1,IP % n
-        S = IP % s(t)
+       Normal = NormalVector( Element, Nodes, U, V, .TRUE. ) 
 
-        Normal = NormalVector( Element, Nodes, IP % U(t), IP % V(t), .TRUE. ) 
-
-        ! Basis function values & derivatives at the integration point:
-        ! -------------------------------------------------------------
-        stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), IP % W(t), detJ, &
+       ! Basis function values & derivatives at the integration point:
+       ! -------------------------------------------------------------
+       stat = ElementInfo( Element, Nodes, U, V, W, detJ, &
                Basis, dBasisdx, ddBasisddx, .FALSE. )
-        S = S * detJ
-        cu = 0.0d0
-        DO i=1,dim
+       S = S * detJ
+       cu = 0.0d0
+       DO i=1,dim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
-        END DO
-        UdotnA = UdotnA + s*SUM( Normal * cu )
-      END DO
+       END DO
+       UdotnA = UdotnA + s*SUM( Normal * cu )
 
-      ! Now switch to the actual integration
-      DO t=1,IP % n
-        S = IP % s(t)
+     END DO
 
-        Normal = NormalVector( Element, Nodes, IP % U(t), IP % V(t), .TRUE. ) 
+     DO t=1,IntegStuff % n
+       U = IntegStuff % u(t)
+       V = IntegStuff % v(t)
+       W = IntegStuff % w(t)
+       S = IntegStuff % s(t)
 
-        ! Basis function values & derivatives at the integration point:
-        ! -------------------------------------------------------------
-        stat = ElementInfo( Element, Nodes, IP % U(t), IP % V(t), IP % W(t), detJ, &
-                Basis, dBasisdx, ddBasisddx, .FALSE. )
-        S = S * detJ
+       Normal = NormalVector( Element, Nodes, U, V, .TRUE. ) 
 
-        CALL FindParentUVW( Element, n, ParentElement, np, IP % U(t), IP % V(t), IP % W(t), Basis )
-        stat = ElementInfo( ParentElement, ParentNodes, &
-            IP % U(t), IP % V(t), IP % W(t), &
-            detJ,  ParentBasis, ParentdBasisdx, ParentddBasisddx, .FALSE. )
-        
-        ! Calculate the normal component of the velocity
-        cu = 0.0d0
-        DO i=1,dim
+       ! Basis function values & derivatives at the integration point:
+       ! -------------------------------------------------------------
+       stat = ElementInfo( Element, Nodes, U, V, W, detJ, &
+               Basis, dBasisdx, ddBasisddx, .FALSE. )
+       S = S * detJ
+
+       CALL FindParentUVW( Element, n, ParentElement, np, U, V, W, Basis )
+       stat = ElementInfo( ParentElement, ParentNodes, U, V, W, &
+           detJ,  ParentBasis, ParentdBasisdx, ParentddBasisddx, .FALSE. )
+
+       L = SUM( LOAD(1:n) * Basis(1:n) )
+       cu = 0.0d0
+       DO i=1,dim
           cu(i) = SUM( (Velo(i,1:n)-MeshVelo(i,1:n)) * Basis(1:n) )
-        END DO
-        Udotn = SUM( Normal * cu )
+       END DO
+       Udotn = SUM( Normal * cu )
 
-        ! Now go through each component
-        DO p = 1,np
-          DO j=1,SpectralDim
-            L = SUM( LOAD(j:j + (n - 1) * SpectralDim:SpectralDim ) * Basis(1:n) )
-            IF (InFlowBC .And. (UdotnA < 0.) ) THEN
-              FORCE(SpectralDim * (p - 1) + j) = FORCE(SpectralDim * (p - 1) + j) - s * Udotn*L*ParentBasis(p)
-            ELSE
-              DO q=1,np
-                STIFF(SpectralDim * (p - 1) + j, SpectralDim * (q - 1) + j) = &
-                    STIFF(SpectralDim * (p - 1) + j, SpectralDim * (q - 1) + j) &
-                    + s*Udotn*ParentBasis(q)*ParentBasis(p)
-              END DO
-            END IF
-          END DO
-        END DO
-      END DO
+       DO p = 1,np
+        IF (InFlowBC .And. (UdotnA < 0.) ) THEN
+            FORCE(p) = FORCE(p) - s * Udotn*L*ParentBasis(p)
+         ELSE
+           DO q=1,np
+             STIFF(p,q) = STIFF(p,q) + s*Udotn*ParentBasis(q)*ParentBasis(p)
+           END DO
+         END IF
+       END DO
+     END DO
 !------------------------------------------------------------------------------
-      END SUBROUTINE LocalMatrixBoundary
+   END SUBROUTINE LocalMatrixBoundary
 !------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------

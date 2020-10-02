@@ -14,11 +14,11 @@ Simulation
   Timestep Sizes = 0.05
 
   Steady State Min Iterations = 1
-  Steady State Max Iterations = 1
+  Steady State Max Iterations = 10
 
   !Output File = "test.result"
   Post File = "test.vtu"
-  max output level = 20
+  max output level = 4
 
   Initialize Dirichlet Conditions = Logical False
 End
@@ -86,6 +86,9 @@ Solver 1
   Exported Variable 4 =  Spin              ! Compute Spin
   Exported Variable 4 DOFS = Integer 1     !1 in 2D  3 in 3D (12,23,31)
 
+  Exported Variable 5 =  SpectralFabric              ! Compute Spin
+  Exported Variable 5 DOFS = Integer 6     !1 in 2D  3 in 3D (12,23,31)
+
   Procedure = "ElmerIceSolvers" "AIFlowSolver_nlS2"
 
   Linear System Solver = Direct
@@ -105,16 +108,16 @@ End
 !!!!!Fabric Solver
 Solver 2
   Equation = Fabric
-  Variable = SpectralFabric
+  Variable = -nooutput DumFabric
   Variable DOFs = 1
 
   Procedure = "ElmerIceSolvers" "SpectralFabricSolver"
   Discontinuous Galerkin = Logical True
 
-  Fabric Order = Integer 1
+  Fabric Order = Integer 3
 
-  Temperature Solution Name = String Temperature
   Flow Solution Name = String AIFlow
+  Fabric Name = String SpectralFabric
 
   Linear System Solver = Direct
   Linear System Direct Method = umfpack
