@@ -715,13 +715,13 @@ CONTAINS
 
         ! Need the fabric vector
         ThisNodeFabric = 0.0
-        DO i = 1,STDOFs
+        DO i = 1,SpectralDim
           ThisNodeFabric(i) = SUM(Basis(1:n) * LocalFabric(i::STDOFs))
         END DO
 
 
         !    Plug in Nicholas's model
-        CALL SpectralModel(STDOFs, SpectralOrder,ThisNodeFabric, StrainRate, Spin1, &
+        CALL SpectralModel(SpectralDim, SpectralOrder,ThisNodeFabric, StrainRate, Spin1, &
                           OverlapMatrix, DCDt)
 
                       
@@ -734,7 +734,7 @@ CONTAINS
 !
 !           Reaction terms:
 !           ---------------
-            ! A = A - DCDt(p,q) * Basis(q) * Basis(p)
+            A = A - DCDt(Comp,Comp) * Basis(q) * Basis(p)
 
             !
             ! Advection terms:
@@ -749,13 +749,12 @@ CONTAINS
             STIFF( p,q ) = STIFF( p,q ) + s * A
          END DO
 
-
-
-
-
-        ! The righthand side...is zero:
+        ! The righthand side
         ! ----------------------
-        LoadAtIp = 0.0_dp
+        ! Need to subtract off the component that is caused
+        ! by the diagonal element, since we solve for that above
+        LoadAtIp = SUM(DCDt(comp, :) * ThisNodeFabric) - DCDt(comp, comp) * ThisNodeFabric(comp)
+
         LoadAtIp= LoadAtIp * Basis(p)
         FORCE(p) = FORCE(p) + s*LoadAtIp
         END DO
