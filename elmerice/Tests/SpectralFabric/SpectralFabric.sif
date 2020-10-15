@@ -42,22 +42,93 @@ Material 1
   Activation Energy 1 = Real 7.8e04    ! Joule/mol for T<TL
   Activation Energy 2 = Real 7.8e04    ! Joule/mol for T>TL
 
+  ! Leave this for now to facilitate comparison
   Isotropic = Logical True !If set to true Glen flow law (no need to defined Fabric)
 
   !!!! For Fabric Solver
   Interaction Parameter = Real 0.0
+  Diffusion Parameter = Real 0.   ! Diffusion term. By default set to 0 if not defined
+
+  !!! For the old-school fabric solver
+  Viscosity File = FILE "040010010.Va"
 End
 
 !%%%%%%%%%%%%%%%%%%%%%      Initial Condition
 Initial Condition 1
+  ! Just for comparison
+  Fabric 1 = Real 00.333
+  Fabric 2 = Real 00.333
+  Fabric 3 = Real 00.0
+  Fabric 4 = Real 00.0
+  Fabric 5 = Real 00.0
 
-  SpectralFabric = Real 0.33    ! C_0^0
-  SpectralFabric 1 = Real 0.33    ! C_0^0
-  SpectralFabric 2 = Real 0.33
-  SpectralFabric 3 = Real 0.33
+  SpectralFabric = Real 0.282    ! C_0^0
+  SpectralFabric 1 = Real 0.282    ! C_0^0
+  SpectralFabric 2 = Real 0.0
+  SpectralFabric 3 = Real 0.0
   SpectralFabric 4 = Real 0.0
   SpectralFabric 5 = Real 0.0
   SpectralFabric 6 = Real 0.0
+  SpectralFabric 7 = Real 0.
+  SpectralFabric 8 = Real 0.
+  SpectralFabric 9 = Real 0.
+  SpectralFabric 10 = Real 0.
+  SpectralFabric 11 = Real 0.
+  SpectralFabric 12 = Real 0.
+  SpectralFabric 13 = Real 0.
+  SpectralFabric 14 = Real 0.
+  SpectralFabric 15 = Real 0.
+  SpectralFabric 16 = Real 0.
+  SpectralFabric 17 = Real 0.
+  SpectralFabric 18 = Real 0.
+  SpectralFabric 19 = Real 0.
+  SpectralFabric 20 = Real 0.
+  SpectralFabric 21 = Real 0.
+  SpectralFabric 22 = Real 0.
+  SpectralFabric 23 = Real 0.
+  SpectralFabric 24 = Real 0.
+  SpectralFabric 25 = Real 0.
+  SpectralFabric 26 = Real 0.
+  SpectralFabric 27 = Real 0.
+  SpectralFabric 28 = Real 0.
+  SpectralFabric 29 = Real 0.
+  SpectralFabric 30 = Real 0.
+  SpectralFabric 31 = Real 0.
+  SpectralFabric 32 = Real 0.
+  SpectralFabric 33 = Real 0.
+  SpectralFabric 34 = Real 0.
+  SpectralFabric 35 = Real 0.
+  SpectralFabric 36 = Real 0.
+  SpectralFabric 37 = Real 0.
+  SpectralFabric 38 = Real 0.
+  SpectralFabric 39 = Real 0.
+  SpectralFabric 40 = Real 0.
+  SpectralFabric 41 = Real 0.
+  SpectralFabric 42 = Real 0.
+  SpectralFabric 43 = Real 0.
+  SpectralFabric 44 = Real 0.
+  SpectralFabric 45 = Real 0.
+  SpectralFabric 46 = Real 0.
+  SpectralFabric 47 = Real 0.
+  SpectralFabric 48 = Real 0.
+  SpectralFabric 49 = Real 0.
+  SpectralFabric 50 = Real 0.
+  SpectralFabric 51 = Real 0.
+  SpectralFabric 52 = Real 0.
+  SpectralFabric 53 = Real 0.
+  SpectralFabric 54 = Real 0.
+  SpectralFabric 55 = Real 0.
+  SpectralFabric 56 = Real 0.
+  SpectralFabric 57 = Real 0.
+  SpectralFabric 58 = Real 0.
+  SpectralFabric 59 = Real 0.
+  SpectralFabric 60 = Real 0.
+  SpectralFabric 61 = Real 0.
+  SpectralFabric 62 = Real 0.
+  SpectralFabric 63 = Real 0.
+  SpectralFabric 64 = Real 0.
+  SpectralFabric 65 = Real 0.
+  SpectralFabric 66 = Real 0.
 
   AIFlow 1 = Real 0.0              ! u_1
   AIFlow 2 = Real -2.0e-1              ! u_2
@@ -85,8 +156,20 @@ Solver 1
   Exported Variable 4 =  Spin              ! Compute Spin
   Exported Variable 4 DOFS = Integer 1     !1 in 2D  3 in 3D (12,23,31)
 
-  Exported Variable 5 =  SpectralFabric              ! Compute Spin
-  Exported Variable 5 DOFS = Integer 6     !1 in 2D  3 in 3D (12,23,31)
+  Exported Variable 5 =  SpectralFabric
+  Exported Variable 5 DOFS = Integer 15 
+
+  Exported Variable 6 =  SpectralC2
+  Exported Variable 6 DOFS = Integer 5
+
+  Exported Variable 7 =  SpectralEigenV
+  Exported Variable 7 DOFS = Integer 6
+
+  Exported Variable 8 =  Fabric
+  Exported Variable 8 DOFS = Integer 5
+
+  Exported Variable 9 =  EigenV
+  Exported Variable 9 DOFS = Integer 6
 
   Procedure = "ElmerIceSolvers" "AIFlowSolver_nlS2"
 
@@ -106,17 +189,19 @@ End
 
 !!!!!Fabric Solver
 Solver 2
-  Equation = Fabric
+  Equation = SpectralFabric
   Variable = -nooutput DumFabric
   Variable DOFs = 1
 
   Procedure = "ElmerIceSolvers" "SpectralFabricSolver"
   Discontinuous Galerkin = Logical True
 
-  Fabric Order = Integer 3
+  Fabric Order = Integer 4
 
   Flow Solution Name = String AIFlow
   Fabric Name = String SpectralFabric
+  C2 Name = String SpectralC2
+  EigenV Name = String SpectralEigenV
 
   Linear System Solver = Direct
   Linear System Direct Method = umfpack
@@ -128,32 +213,116 @@ Solver 2
   Nonlinear System Newton After Tolerance = 1.0e-5
 End
 
+Solver 3
+  Equation = Fabric
+  Variable = -nooutput Compfab    ! dumy variable
+  Variable DOFs = 1               !FabricSolver compute each variable independently, Picard Type iterations
+
+  Procedure = "ElmerIceSolvers" "FabricSolver"
+  Discontinuous Galerkin = Logical True
+
+
+  Linear System Solver = Direct
+  Linear System Direct Method = umfpack
+
+  Nonlinear System Max Iterations = 10
+  Nonlinear System Convergence Tolerance  = 1.0e-5
+  Nonlinear System Relaxation Factor = 1.00
+
+End
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 Equation 1
-  Active Solvers(2)= 1 2
+  Active Solvers(3)= 1 2 3
 End
 
 !%%%%%%%%%%%%%%%%%%%%%      Boundary Condition
 Boundary Condition 1
   Target Boundaries = 3
   name= String 'top'
-  AIFlow 2 = Real -2.0e0
+  AIFlow 2 = Real -0.2e0
 
+  ! Just for comparison
+  Fabric 1 = Real 00.333
+  Fabric 2 = Real 00.333
+  Fabric 3 = Real 00.0
+  Fabric 4 = Real 00.0
+  Fabric 5 = Real 00.0
 
-  SpectralFabric = Real 1.0    ! C_0^0
-  SpectralFabric 1 = Real 1.0    ! C_0^0
+  ! For the new solver
+  SpectralFabric = Real 0.282    ! C_0^0
+  SpectralFabric 1 = Real 0.282    ! C_0^0
   SpectralFabric 2 = Real 0.
   SpectralFabric 3 = Real 0.
   SpectralFabric 4 = Real 0.
   SpectralFabric 5 = Real 0.
   SpectralFabric 6 = Real 0.
+  SpectralFabric 7 = Real 0.
+  SpectralFabric 8 = Real 0.
+  SpectralFabric 9 = Real 0.
+  SpectralFabric 10 = Real 0.
+  SpectralFabric 11 = Real 0.
+  SpectralFabric 12 = Real 0.
+  SpectralFabric 13 = Real 0.
+  SpectralFabric 14 = Real 0.
+  SpectralFabric 15 = Real 0.
+  SpectralFabric 16 = Real 0.
+  SpectralFabric 17 = Real 0.
+  SpectralFabric 18 = Real 0.
+  SpectralFabric 19 = Real 0.
+  SpectralFabric 20 = Real 0.
+  SpectralFabric 21 = Real 0.
+  SpectralFabric 22 = Real 0.
+  SpectralFabric 23 = Real 0.
+  SpectralFabric 24 = Real 0.
+  SpectralFabric 25 = Real 0.
+  SpectralFabric 26 = Real 0.
+  SpectralFabric 27 = Real 0.
+  SpectralFabric 28 = Real 0.
+  SpectralFabric 29 = Real 0.
+  SpectralFabric 30 = Real 0.
+  SpectralFabric 31 = Real 0.
+  SpectralFabric 32 = Real 0.
+  SpectralFabric 33 = Real 0.
+  SpectralFabric 34 = Real 0.
+  SpectralFabric 35 = Real 0.
+  SpectralFabric 36 = Real 0.
+  SpectralFabric 37 = Real 0.
+  SpectralFabric 38 = Real 0.
+  SpectralFabric 39 = Real 0.
+  SpectralFabric 40 = Real 0.
+  SpectralFabric 41 = Real 0.
+  SpectralFabric 42 = Real 0.
+  SpectralFabric 43 = Real 0.
+  SpectralFabric 44 = Real 0.
+  SpectralFabric 45 = Real 0.
+  SpectralFabric 46 = Real 0.
+  SpectralFabric 47 = Real 0.
+  SpectralFabric 48 = Real 0.
+  SpectralFabric 49 = Real 0.
+  SpectralFabric 50 = Real 0.
+  SpectralFabric 51 = Real 0.
+  SpectralFabric 52 = Real 0.
+  SpectralFabric 53 = Real 0.
+  SpectralFabric 54 = Real 0.
+  SpectralFabric 55 = Real 0.
+  SpectralFabric 56 = Real 0.
+  SpectralFabric 57 = Real 0.
+  SpectralFabric 58 = Real 0.
+  SpectralFabric 59 = Real 0.
+  SpectralFabric 60 = Real 0.
+  SpectralFabric 61 = Real 0.
+  SpectralFabric 62 = Real 0.
+  SpectralFabric 63 = Real 0.
+  SpectralFabric 64 = Real 0.
+  SpectralFabric 65 = Real 0.
+  SpectralFabric 66 = Real 0.
 End
 
 Boundary Condition 2
   Target Boundaries = 1
   name= String 'bottom'
-  AIFlow 2 = Real -0.2e0
+  AIFlow 2 = Real -0.02e0
 End
 
 Boundary Condition 3

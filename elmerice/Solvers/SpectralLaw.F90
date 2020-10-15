@@ -104,6 +104,7 @@
 
       SUBROUTINE SpectralModel(ProbDim, SpectralOrder, C, StrainRate, Spin, &
                                OverlapMatrix, DCDt)
+        USE specfab
         IMPLICIT NONE
         INTEGER, PARAMETER :: dp=8
         INTEGER, INTENT(IN) :: SpectralOrder, ProbDim
@@ -122,21 +123,16 @@
         ! with the Lagrangian fabric evolution. Elmer does the timestepping, so you just
         ! need to return a matrix such that the matrix DCDt * C = DC/Dt in a Lagrangian sense.
             
-        INTEGER :: i
-        ! Set to dummy values so that I can check if the overall code works
-        ! Here, just diffusion amongst the coefficients since it is easy
+        LOGICAL :: FIRSTTIME=.TRUE.
+        SAVE FIRSTTIME
+
         DCDt = 0.0
-        ! No guarantees on previous values, so leave the previous line
+        IF (FIRSTTIME) THEN
+            FIRSTTIME = .FALSE.
+            CALL initspecfab()
+        END IF
 
-        DO i = 1,ProbDim - 1
-          DCDt(i, i) = -2
-          DCDt(i, i + 1) = 1
-          DCDt(i + 1, i) = 1
-        END DO
-
-        ! Zero flux at the ends
-        DCDt(1,1) = -1.0
-        DCDt(ProbDim, ProbDim) = -1.0
+        DCDt = dndt_ij(StrainRate, Spin)
       END SUBROUTINE SpectralModel
 
 

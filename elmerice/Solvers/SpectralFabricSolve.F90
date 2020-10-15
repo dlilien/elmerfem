@@ -36,6 +36,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
 
       USE DefUtils
+      USE specfab
 
       IMPLICIT NONE
 !------------------------------------------------------------------------------
@@ -73,45 +74,50 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
       TYPE(Variable_t), POINTER :: &
            FlowVariable, EigenFabricVariable, MeshVeloVariable, &
-           TimeVar, FabricVariable
+           TimeVar, FabricVariable, C2Variable
 
       REAL(KIND=dp), POINTER :: &
            FlowValues(:), EigenFabricValues(:), &
            MeshVeloValues(:), FabricValues(:), &
            PrevFabric(:),CurrFabric(:),TempFabVal(:),&
-           Solution(:), Ref(:)
+           Solution(:), Ref(:), C2Values(:)
 
-      INTEGER, POINTER :: Perm(:),NodeIndexes(:), &
-           FlowPerm(:), MeshVeloPerm(:), EigenFabricPerm(:), FabricPerm(:)
+      INTEGER, POINTER :: NodeIndexes(:), &
+           FlowPerm(:), MeshVeloPerm(:), C2Perm(:), EigenFabricPerm(:), FabricPerm(:)
 
       INTEGER :: body_id,bf_id,eq_id, Indexes(128),SpectralOrder,&
                  old_body = -1, NewtonIter,NonlinearIter, Node,&
                  dim,n1,n2,i,j,k,l,n,nd,t,iter,NDeg,STDOFs,LocalNodes,istat,&
-                 comp, SpectralDim
-
+                 comp, SpectralDim,INDi(6),INDj(6)
       REAL(KIND=dp) :: rho, lambda, A1plusA2, Bu, Bv, Bw, &
            a2(6), ai(3), Angle(3), RM(3,3), &
            SaveTime = -1, RelativeChange,UNorm,PrevUNorm,Gravity(3), &
-           Tdiff,Normal(3),NewtonTol,NonlinearTol,s,OverlapMatrix
+           Tdiff,Normal(3),NewtonTol,NonlinearTol,s,OverlapMatrix,&
+           C2(3,3)
 
       REAL(KIND=dp), parameter :: Rad2deg=180._dp/Pi
 
       CHARACTER(LEN=MAX_NAME_LEN) :: SolverName='SpectralFabric',&
                                      FlowName, ComponentName, &
-                                     FabricName, OverlapMatrixFile
+                                     FabricName, OverlapMatrixFile,&
+                                     C2Name, EigName
 
       LOGICAL :: GotForceBC,GotIt,NewtonLinearization=.FALSE.,&
                  UnFoundFatal=.TRUE.,AllocationsDone = .FALSE.,&
-                 FreeSurface,FirstTime=.TRUE.
+                 FreeSurface,ExportFabric=.False.,FirstTime=.TRUE.,&
+                 ExportEigV=.False.
 
       REAL(KIND=dp), ALLOCATABLE:: MASS(:,:), STIFF(:,:), LOAD(:,:),Force(:), &
           Alpha(:,:),Beta(:),Velocity(:,:), MeshVelocity(:,:), LocalFabric(:)
+
+      COMPLEX(KIND=dp), ALLOCATABLE:: FabOut(:)
 
       SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
            AllocationsDone, rho, lambda, Velocity, &
            MeshVelocity, old_body, dim, comp, SolverName, &
            CurrFabric, TempFabVal, PrevFabric, &
-           SpectralOrder, OverlapMatrix, LocalFabric
+           SpectralOrder, OverlapMatrix, LocalFabric, &
+           ExportEigV, ExportFabric, FabOut
 
 #ifdef USE_ISO_C_BINDINGS
       REAL(KIND=dp) :: at, at0
@@ -126,6 +132,13 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
         END SUBROUTINE PostProcessFabric
       END INTERFACE
 
+      INTERFACE
+        Subroutine R2Ro_mat(A,ai,angle)
+        USE Types
+        REAL(KIND=dp),intent(in) :: A(3,3)
+        REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
+       End Subroutine R2Ro_mat
+      End Interface  
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
@@ -135,14 +148,16 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
       IF ( .NOT. ASSOCIATED( Solver % Matrix ) ) RETURN
 
-      Perm => Solver % Variable % Perm
+      Solution => Solver % Variable % Values
       STDOFs   =  Solver % Variable % DOFs
 
       SolverParams => GetSolverParams()
 
       SpectralOrder = ListGetInteger( SolverParams,'Fabric Order', &
           GotIt,UnFoundFatal=.TRUE. )
-      SpectralDim = SpectralOrder * (SpectralOrder + 1) / 2
+      ! SpectralDim = SpectralOrder * (SpectralOrder + 1) / 2
+      SpectralDim = sum([(1+i*2, i=0, SpectralOrder,2)])
+
 
       FlowName = ListGetString( SolverParams, 'Flow Solution Name', &
             GotIt,UnFoundFatal=.FALSE. )
@@ -176,7 +191,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
         CALL FATAL(SolverName, message)
       END IF
       IF (SpectralDim .NE. FabricVariable % DOFs) THEN
-        WRITE(Message,*) 'Fabric DOF mismatch'
+          WRITE(Message,*) 'Fabric DOF mismatch', SpectralDim, 'is not', FabricVariable % DOFs
         CALL FATAL(SolverName, message)
       END IF
 
@@ -185,6 +200,38 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
       IF ( ASSOCIATED( MeshVeloVariable ) ) THEN
         MeshVeloPerm    => MeshVeloVariable % Perm
         MeshVeloValues  => MeshVeloVariable % Values
+      END IF
+
+      C2Name = ListGetString( SolverParams, 'C2 Name', &
+            GotIt,UnFoundFatal=.FALSE. )
+      IF (GotIt) THEN
+        ExportFabric = .TRUE.
+        C2Variable => VariableGet( Solver % Mesh % Variables, C2Name)
+        IF ( ASSOCIATED( C2Variable ) ) THEN
+          C2Perm    => C2Variable % Perm
+          C2Values  => C2Variable % Values
+          WRITE(Message,'(A,A)') 'C2 variable = ', C2Name
+          CALL INFO(SolverName, Message , level = 20)
+        ELSE
+          WRITE(Message,'(A,A)') 'C2 variable called for but not found:', C2Name
+          CALL FATAL(SolverName, message)
+        END IF
+      END IF
+
+      EigName = ListGetString( SolverParams, 'EigenV Name', &
+            GotIt,UnFoundFatal=.FALSE. )
+      IF (GotIt) THEN
+        ExportEigV = .TRUE.
+        EigenFabricVariable => VariableGet( Solver % Mesh % Variables, EigName)
+        IF ( ASSOCIATED( C2Variable ) ) THEN
+          EigenFabricPerm    => EigenFabricVariable % Perm
+          EigenFabricValues  => EigenFabricVariable % Values
+          WRITE(Message,'(A,A)') 'EigenV variable = ', EigName
+          CALL INFO(SolverName, Message , level = 20)
+        ELSE
+          WRITE(Message,'(A,A)') 'EigenV variable called for but not found:', EigName
+          CALL FATAL(SolverName, message)
+        END IF
       END IF
 
       !!!!!!!!!!!!!
@@ -212,7 +259,8 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
                      MASS,STIFF,&
                      LOAD, Alpha, Beta,&
                      LocalFabric,&
-                     CurrFabric, TempFabVal )
+                     CurrFabric, TempFabVal,&
+                     FabOut )
        END IF
 
        ALLOCATE( Force( 2*STDOFs*N ), &
@@ -223,6 +271,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
                  CurrFabric( SpectralDim*SIZE(Solver % Variable % Values)), &
                  TempFabVal( SIZE(FabricValues)), &
                  LocalFabric(N * SpectralDim), &	
+                 FabOut(SpectralDim), &	
                  STAT=istat )
 
 
@@ -241,6 +290,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
        DO i=1,Solver % NumberOFActiveElements
           CurrentElement => GetActiveElement(i)   
           n = GetElementDOFs( Indexes )
+          write(*,*) indexes
           n = GetElementNOFNodes()
           NodeIndexes => CurrentElement % NodeIndexes
           Indexes(1:n) = Solver % Variable % Perm( Indexes(1:n) )
@@ -314,7 +364,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
                    (Solver % NumberOfActiveElements-t) / &
                       (1.0*Solver % NumberOfActiveElements)), ' % done'
                                
-                  CALL Info(SolverName, Message, Level=5 )
+                  CALL Info(SolverName, Message, Level=6 )
                   at0 = RealTime()
                 END IF
 
@@ -328,7 +378,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
              DO i=1,SpectralDim
                LocalFabric(i::SpectralDim) = CurrFabric(SpectralDim*(&
-                 Perm(Indexes(1:n)) - 1) + i )
+                 Solver % Variable % Perm(Indexes(1:n)) - 1) + i )
              END DO
 
     !------------------------------------------------------------------------------
@@ -395,6 +445,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
             FORCE = 0.0d0
             MASS  = 0.0d0
+            STIFF = 0.0d0
             CALL LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
             IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
             CALL DefaultUpdateEquations( STIFF, FORCE, Edge )
@@ -433,6 +484,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
 
             FORCE = 0.0d0
             MASS  = 0.0d0
+            STIFF = 0.0d0
             CALL LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velocity,MeshVelocity )
             IF ( TransientSimulation )  CALL Default1stOrderTime(MASS, STIFF, FORCE)
             CALL DefaultUpdateEquations( STIFF, FORCE, Edge )
@@ -484,6 +536,8 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
          END IF
 
          MASS = 0.0d0
+         STIFF = 0.0d0
+         FORCE = 0.0d0
          CALL LocalMatrixBoundary(  STIFF, FORCE, LOAD(1,1:n), &
                               Element, n, ParentElement, n1, Velocity,MeshVelocity, GotIt )
 
@@ -516,7 +570,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
             k = Element % NodeIndexes(i)
             TempFabVal( SpectralDim*(FabricPerm(k)-1) + COMP ) =    & 
             TempFabVal( SpectralDim*(FabricPerm(k)-1) + COMP ) + &
-            Solver % Variable % Values(Perm(Indexes(i)) )
+            Solver % Variable % Values(Solver % Variable % Perm(Indexes(i)) )
             FabricValues( SpectralDim*(FabricPerm(k)-1) + COMP ) = &
                           TempFabVal(SpectralDim*(FabricPerm(k)-1) + COMP ) 
             Ref(k) = Ref(k) + 1
@@ -532,10 +586,35 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
           END IF
         END DO
         DEALLOCATE( Ref )
+        
       END DO ! End DO Comp
+
+      INDi(1:5) = (/ 1, 2, 1, 2, 3 /)
+      INDj(1:5) = (/ 1, 2, 2, 3, 1 /)
 
       ! Need to post-process every node to make sure we are normalized
       DO i=1,Solver % Mesh % NumberOfNodes
+        IF (ExportFabric.OR.ExportEigV) THEN
+          FabOut = CMPLX(FabricValues(SpectralDim*(i - 1) + 1:SpectralDim*i))
+          C2 = A2_ij(FabOut)
+          ! C2 = reshape((/ 0.33, 0.0, 0.0, 0.0, 0.33, 0.0, 0.0, 0.0, 0.33 /), shape(C2))
+
+        END IF
+        IF (ExportFabric) THEN
+          DO j=1,5
+            C2Values(5 * (C2Perm(i) - 1) + j) = C2(INDi(j), INDj(j))
+          END DO
+        END IF
+        IF (ExportFabric) THEN
+          call R2Ro_mat(C2,ai,angle)
+          angle(:)=angle(:)*rad2deg
+          If (angle(1).gt.90._dp) angle(1)=angle(1)-180._dp
+          If (angle(1).lt.-90._dp) angle(1)=angle(1)+180._dp
+          DO j=1,3
+            EigenFabricValues(6 * (EigenFabricPerm(i) - 1) + j) = ai(j)
+            EigenFabricValues(6 * (EigenFabricPerm(i) - 1) + 3 + j) = angle(j)
+          END DO
+        END IF
         CALL PostProcessFabric(FabricValues(SpectralDim*(i - 1) + 1:SpectralDim*i), SpectralDim)
       END DO
 
@@ -545,7 +624,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
           n = GetElementDOFs( Indexes )
           n = GetElementNOFNodes()
           NodeIndexes => CurrentElement % NodeIndexes
-          Indexes(1:n) = Perm( Indexes(1:n) )
+          Indexes(1:n) = Solver % Variable %Perm( Indexes(1:n) )
           DO COMP=1,SpectralDim
             CurrFabric(SpectralDim*(Indexes(1:n)-1)+COMP) = &
                         FabricValues(SpectralDim*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
@@ -612,7 +691,7 @@ CONTAINS
       REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
       REAL(KIND=dp) :: ap(3),Spin1(3,3),&
         ThisNodeFabric(SpectralDim)
-      LOGICAL :: CSymmetry, Fond
+      LOGICAL :: CSymmetry
               
       INTEGER :: N_Integ
       REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ, &
@@ -633,11 +712,8 @@ CONTAINS
         END SUBROUTINE SpectralModel
       END INTERFACE
 !------------------------------------------------------------------------------
-      Fond=.False.
       
-      hmax = maxval (Nodes % y(1:n))
-        
-     dim = CoordinateSystemDimension()
+      dim = CoordinateSystemDimension()
 
       FORCE = 0.0D0
       MASS  = 0.0D0
@@ -762,6 +838,8 @@ CONTAINS
       END DO  ! Of integration points
 !------------------------------------------------------------------------------
 
+ 1000 FORMAT((a),x,i2,x,6(e13.5,x)) 
+ 1001 FORMAT(6(e13.5,x))
 !------------------------------------------------------------------------------
       END SUBROUTINE LocalMatrix
 !------------------------------------------------------------------------------
