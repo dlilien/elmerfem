@@ -290,7 +290,6 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
        DO i=1,Solver % NumberOFActiveElements
           CurrentElement => GetActiveElement(i)   
           n = GetElementDOFs( Indexes )
-          write(*,*) indexes
           n = GetElementNOFNodes()
           NodeIndexes => CurrentElement % NodeIndexes
           Indexes(1:n) = Solver % Variable % Perm( Indexes(1:n) )

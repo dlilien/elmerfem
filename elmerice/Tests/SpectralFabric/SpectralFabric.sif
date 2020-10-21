@@ -157,7 +157,7 @@ Solver 1
   Exported Variable 4 DOFS = Integer 1     !1 in 2D  3 in 3D (12,23,31)
 
   Exported Variable 5 =  SpectralFabric
-  Exported Variable 5 DOFS = Integer 15 
+  Exported Variable 5 DOFS = Integer 66
 
   Exported Variable 6 =  SpectralC2
   Exported Variable 6 DOFS = Integer 5
@@ -196,7 +196,7 @@ Solver 2
   Procedure = "ElmerIceSolvers" "SpectralFabricSolver"
   Discontinuous Galerkin = Logical True
 
-  Fabric Order = Integer 4
+  Fabric Order = Integer 10
 
   Flow Solution Name = String AIFlow
   Fabric Name = String SpectralFabric

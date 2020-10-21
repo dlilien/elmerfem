@@ -119,6 +119,7 @@
         ! to the SpectralOrder. You can size this however you like,
         ! and I will modify the main code to match
         REAL(KIND=dp), INTENT(OUT) :: DCDt(ProbDim, ProbDim)
+        COMPLEX(KIND=dp) :: DCDt_comp(ProbDim, ProbDim)
         ! I have the advection piece handled, so all that needs to be done is to deal
         ! with the Lagrangian fabric evolution. Elmer does the timestepping, so you just
         ! need to return a matrix such that the matrix DCDt * C = DC/Dt in a Lagrangian sense.
@@ -132,7 +133,9 @@
             CALL initspecfab()
         END IF
 
-        DCDt = dndt_ij(StrainRate, Spin)
+        DCDt_comp = dndt_ij(StrainRate, Spin)
+        DCDt = REALPART(DCDt_comp)
+        ! write(*,*) imagpart(DCDt_comp)
       END SUBROUTINE SpectralModel
 
 
