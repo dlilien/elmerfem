@@ -687,7 +687,7 @@ CONTAINS
       REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6)
       REAL(KIND=dp) :: Velo(3),StrainR(6),Spin(3),SD(6)
 
-      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
+      REAL(KIND=dp) :: LGrad(2,2),SR(2,2),StrainRate(3,3),D(6),angle(3),epsi
       REAL(KIND=dp) :: ap(3),Spin1(3,3),&
         ThisNodeFabric(SpectralDim)
       LOGICAL :: CSymmetry
@@ -752,9 +752,17 @@ CONTAINS
 
         !    Compute strainRate and Spin :
         !    -----------------------------
-        LGrad = MATMUL( NodalVelo(1:3,1:n), dBasisdx(1:n,1:3) )
-        StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
-        Spin1 = 0.5 * ( LGrad - TRANSPOSE(LGrad) )
+        LGrad = MATMUL( NodalVelo(1:2,1:n), dBasisdx(1:n,1:2) )
+        SR = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
+        StrainRate(1,1) = SR(1, 1)
+        StrainRate(3,1) = SR(2, 1)
+        StrainRate(1,3) = SR(1, 2)
+        StrainRate(3,3) = SR(2, 2)
+        SR = 0.5 * ( LGrad - TRANSPOSE(LGrad) )
+        Spin1(1,1) = SR(1, 1)
+        Spin1(3,1) = SR(2, 1)
+        Spin1(1,3) = SR(1, 2)
+        Spin1(3,3) = SR(2, 2)
 
         IF ( CSymmetry ) THEN
           StrainRate(1,3) = 0.0

@@ -49,7 +49,7 @@ ELSE()
   MESSAGE(WARNING "  \n Missing: >HDF5_INCLUDE_DIR< , >HDF5_LIBRARY<,  >HDF5F_LIBRARY< \n some functionalities will be disabled")
 ENDIF(PHDF5_FOUND)
 
-
+INCLUDE_DIRECTORIES("/home/dlilien/sw/specfab")
 # ---------------------- #
 # -- LOOK FOR MMG     -- #
 #----------------------- #
@@ -132,6 +132,8 @@ ENDIF()
 IF(HAVE_HDF5)
 TARGET_LINK_LIBRARIES(ElmerIceSolvers ${PHDF5_LIBRARIES})
 ENDIF()
+
+TARGET_LINK_LIBRARIES(ElmerIceSolvers "/home/dlilien/sw/specfab/libspecfab.so")
 # IF(HAVE_MMG)
 #   TARGET_LINK_LIBRARIES(ElmerIceSolvers ${MMG_LIBRARY})
 #   TARGET_LINK_LIBRARIES(ElmerIceSolvers ElmerIce_MeshAdapt3D)
