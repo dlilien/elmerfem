@@ -588,8 +588,8 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
         
       END DO ! End DO Comp
 
-      INDi(1:5) = (/ 1, 2, 1, 2, 3 /)
-      INDj(1:5) = (/ 1, 2, 2, 3, 1 /)
+      INDi(1:5) = (/ 1, 3, 1, 3, 2 /)
+      INDj(1:5) = (/ 1, 3, 3, 2, 1 /)
 
       ! Need to post-process every node to make sure we are normalized
       DO i=1,Solver % Mesh % NumberOfNodes
