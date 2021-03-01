@@ -90,11 +90,11 @@ SUBROUTINE SaveDependence( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
 ! Local variables
 !------------------------------------------------------------------------------
-  CHARACTER(LEN=MAX_NAME_LEN) :: FileName, ParName, OutputDirectory
-  REAL(KIND=dp) :: x1, x0, x, w, f, Norm
+  CHARACTER(LEN=MAX_NAME_LEN) :: FileName, ParName, Str, OutputDirectory
+  REAL(KIND=dp) :: x1, x0, x, w, f, dfdx, Norm
   INTEGER :: i,j,n,NoPar,NormInd,IOUnit
   TYPE(ValueList_t), POINTER :: Params
-  LOGICAL :: Found, GotIt
+  LOGICAL :: Found, GotIt, TakeDer
   
   IF( ParEnv % PEs > 1 ) THEN
     IF( ParEnv % MyPE > 0 ) RETURN
@@ -115,20 +115,14 @@ SUBROUTINE SaveDependence( Model,Solver,dt,TransientSimulation )
   NormInd = ListGetInteger( Params,'Show Norm Index',GotIt)
   Norm = 0.0_dp
 
-  IF ( .NOT. FileNameQualified(FileName) ) THEN
-    OutputDirectory = GetString( Params,'Output Directory',GotIt)
-    IF( GotIt .AND. LEN_TRIM(OutputDirectory) > 0 ) THEN
-      FileName = TRIM(OutputDirectory)// '/' //TRIM(Filename)
-      CALL MakeDirectory( TRIM(OutputDirectory) // CHAR(0) )
-    ELSE IF( LEN_TRIM(OutputPath ) > 0 ) THEN
-      Filename = TRIM(OutputPath)// '/' //TRIM(Filename)
-    END IF
-  END IF
-
+  CALL SolverOutputDirectory( Solver, Filename, OutputDirectory )
+  Filename = TRIM(OutputDirectory)// '/' //TRIM(Filename)
+  
   IF( GetLogical(Params,'Filename Numbering',GotIt)) THEN
     Filename = NextFreeFilename( Filename )
   END IF
-  
+
+  TakeDer = ListGetLogical( Params,'Take Derivative',GotIt)
 
   n = ListGetInteger( Params,'Number of points',minv=2)
   x0 = ListGetCReal( Params,'Lower limit')
@@ -159,9 +153,14 @@ SUBROUTINE SaveDependence( Model,Solver,dt,TransientSimulation )
     
     DO j=1,NoPar
       WRITE (ParName,'(A,I0)') 'Expression ',j
-      f = ListGetFun( Params,ParName,x )
-      WRITE (IOUnit,'(ES15.6)',ADVANCE='NO') f     
-
+      IF( TakeDer ) THEN
+        f = ListGetFun( Params,ParName,x,Dfdx=Dfdx )
+        WRITE (IOUnit,'(2ES15.6)',ADVANCE='NO') f, dfdx     
+      ELSE
+        f = ListGetFun( Params,ParName,x)
+        WRITE (IOUnit,'(ES15.6)',ADVANCE='NO') f     
+      END IF
+        
       IF( NormInd == j ) Norm = Norm + f*f
     END DO
 

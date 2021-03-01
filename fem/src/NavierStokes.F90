@@ -205,7 +205,7 @@ MODULE NavierStokes
      REAL(KIND=dp) :: gradPDiscConst, CmodelConst
      REAL(KIND=dp) ::SWxSU(n), StrainS(2*n, 4)
      INTEGER :: P2P1stop, ii, jj, kk, ll
-     ! end of transposed varible 
+     ! end of transposed variable 
 
      
 !------------------------------------------------------------------------------
@@ -309,7 +309,7 @@ MODULE NavierStokes
      IF ( Bubbles ) THEN
        IntegStuff = GaussPoints( Element, Element % TYPE % GaussPoints2 )
      ELSE
-       IntegStuff = GaussPoints( Element )
+       IntegStuff = GaussPointsAdapt( Element )
      END IF
      U_Integ => IntegStuff % u
      V_Integ => IntegStuff % v
@@ -1003,7 +1003,7 @@ MODULE NavierStokes
 
 !!------------------------------------------------------------------------------
 !!    Loop over basis functions (of both unknowns and weights)
-!!    Then the stuff i havent vectorized yet
+!!    Then the stuff I haven't vectorized yet
 !!------------------------------------------------------------------------------
     
 !------------------------------------------------------------------------------

@@ -339,7 +339,7 @@ int LoadAbaqusInput(struct FemType *data,struct BoundaryType *bound,
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"inp");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadAbaqusInput: opening of the ABAQUS-file '%s' wasn't succesfull !\n",
+      printf("LoadAbaqusInput: opening of the ABAQUS-file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -824,7 +824,7 @@ omstart:
 
 static int ReadAbaqusField(FILE *in,char *buffer,int *argtype,int *argno)
 /* This subroutine reads the Abaqus file format and tries to make
-   sence out of it. 
+   sense out of it. 
    */
 {
   int i,val,digits;
@@ -914,7 +914,7 @@ int LoadAbaqusOutput(struct FemType *data,char *prefix,int info)
   AddExtension(prefix,filename,"fil");
 
   if ((in = fopen(filename,"r")) == NULL) {
-    printf("LoadAbaqusOutput: opening of the Abaqus-file '%s' wasn't succesfull !\n",
+    printf("LoadAbaqusOutput: opening of the Abaqus-file '%s' wasn't successful !\n",
 	   filename);
     return(1);
   }
@@ -1107,7 +1107,7 @@ int LoadNastranInput(struct FemType *data,struct BoundaryType *bound,
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"nas");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadNastranInput: opening of the Nastran file '%s' wasn't succesfull !\n",
+      printf("LoadNastranInput: opening of the Nastran file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -1350,7 +1350,7 @@ int LoadFidapInput(struct FemType *data,char *prefix,int info)
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"FDNEUT");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadFidapInput: opening of the Fidap-file '%s' wasn't succesfull !\n",
+      printf("LoadFidapInput: opening of the Fidap-file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -1887,7 +1887,15 @@ int LoadAnsysInput(struct FemType *data,struct BoundaryType *bound,
     cp=line;
 
     for(i=0;i<8;i++) {
-      ind = next_int(&cp);
+      if (noknots < 1000000) {
+        ind = next_int(&cp);
+      }                      
+      else if (noknots < 100000000) {
+        ind = next_int_n(&cp,8);
+      }
+      else {
+        ind = next_int_n(&cp,10);
+      }
       if(cp[0] == '.') cp++;
       topology[i] = revindx[ind];
     }
@@ -1909,7 +1917,15 @@ int LoadAnsysInput(struct FemType *data,struct BoundaryType *bound,
 	imax = 20;
 
       for(i=8;i<imax;i++) {
-	ind = next_int(&cp);
+      	if (noknots < 1000000) {
+	  ind = next_int(&cp);
+        }                      
+        else if (noknots < 100000000) {
+          ind = next_int_n(&cp,8);
+        }
+        else {
+          ind = next_int_n(&cp,10);
+        }
 	if(cp[0] == '.') cp++;
 	topology[i] = revindx[ind];
       }
@@ -2005,7 +2021,7 @@ int LoadAnsysInput(struct FemType *data,struct BoundaryType *bound,
 	  bctypes[bcind] = TRUE;
 	}
 	
-	/* Find 1st unsed boundarytype */
+	/* Find 1st unused boundarytype */
 	for(i=1;i<=maxside;i++) 
 	  if(bctypes[i] && !bctypeused[i]) break;
 	
@@ -2125,7 +2141,7 @@ int LoadFieldviewInput(struct FemType *data,char *prefix,int info)
   if ((in = fopen(prefix,"r")) == NULL) {
     AddExtension(prefix,filename,"dat");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadFieldviewInput: opening of the Fieldview-file '%s' wasn't succesfull !\n",
+      printf("LoadFieldviewInput: opening of the Fieldview-file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -2656,7 +2672,7 @@ int LoadGidInput(struct FemType *data,struct BoundaryType *bound,
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"msh");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadGidInput: opening of the GID-file '%s' wasn't succesfull !\n",
+      printf("LoadGidInput: opening of the GID-file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -3013,7 +3029,7 @@ int LoadComsolMesh(struct FemType *data,char *prefix,int info)
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"mphtxt");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadComsolMesh: opening of the Comsol mesh file '%s' wasn't succesfull !\n",
+      printf("LoadComsolMesh: opening of the Comsol mesh file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -3048,13 +3064,13 @@ omstart:
       if(debug) printf("dim=%d\n",dim);
     }
 
-    else if(strstr(line,"# number of mesh points")) {
+    else if(strstr(line,"# number of mesh points") || strstr(line, "# number of mesh vertices")) {
       cp = line;
       noknots = next_int(&cp);
       if(debug) printf("noknots=%d\n",noknots);
     }
 
-    else if(strstr(line,"# lowest mesh point index")) {
+    else if(strstr(line,"# lowest mesh point index") || strstr(line, "# lowest mesh vertex index")) {
       cp = line;
       offset = 1 - next_int(&cp);
       if(debug) printf("offset=%d\n",offset);
@@ -3075,14 +3091,14 @@ omstart:
       }
     }
 
-    else if(strstr(line,"# number of nodes per element")) {
+    else if(strstr(line,"# number of nodes per element") || strstr(line, "# number of vertices per element")) {
       cp = line;
       elemnodes = next_int(&cp);
       if(elemnodes > maxnodes) maxnodes = elemnodes;      
       if(debug) printf("elemnodes=%d\n",elemnodes);           
     }
 
-    else if(strstr(line,"# Mesh point coordinates")) {
+    else if(strstr(line,"# Mesh point coordinates") || strstr(line, "# Mesh vertex coordinates" )) {
       printf("Loading %d coordinates\n",noknots);
 
       for(i=1;i<=noknots;i++) {
@@ -3178,7 +3194,7 @@ end:
   if(!allocated) {
 
     if(noknots == 0 || noelements == 0 || maxnodes == 0) {
-       printf("Invalid mesh consits of %d knots and %d %d-node elements.\n",
+       printf("Invalid mesh consists of %d knots and %d %d-node elements.\n",
 	     noknots,noelements,maxnodes);     
        fclose(in);
        return(2);
@@ -3505,7 +3521,7 @@ allocate:
 	if(k <= 0 || k > maxindx) 
 	  printf("index out of bounds %d\n",k);
 	else if(revindx[k] <= 0) 
-	  printf("unkonwn node %d %d in element %d\n",k,revindx[k],i);
+	  printf("unknown node %d %d in element %d\n",k,revindx[k],i);
 	else 
 	  data->topology[i][j] = revindx[k];
       }      
@@ -3719,7 +3735,7 @@ omstart:
 	if(k <= 0 || k > maxindx) 
 	  printf("index out of bounds %d\n",k);
 	else if(revindx[k] <= 0) 
-	  printf("unkonwn node %d %d in element %d\n",k,revindx[k],i);
+	  printf("unknown node %d %d in element %d\n",k,revindx[k],i);
 	else 
 	  data->topology[i][j] = revindx[k];
       }      
@@ -3751,7 +3767,7 @@ static int LoadGmshInput4(struct FemType *data,struct BoundaryType *bound,
   int i,j,k,l,allocated,*revindx=NULL,maxindx;
   int elemno, gmshtype, tagphys=0, taggeom=0, tagpart, elemnodes,maxelemtype;
   int tagmat,verno;
-  int physvolexist, physsurfexist,**tagmap,tagsize;
+  int physvolexist, physsurfexist,**tagmap,tagsize,maxtag[4];
   FILE *in;
   const char manifoldname[4][10] = {"point", "line", "surface", "volume"};
   char *cp,line[MAXLINESIZE],longline[LONGLINESIZE];
@@ -3769,7 +3785,9 @@ static int LoadGmshInput4(struct FemType *data,struct BoundaryType *bound,
   maxelemtype = 0;
   physvolexist = FALSE;
   physsurfexist = FALSE;
+  for(i=0;i<4;i++) maxtag[i] = 0;
 
+  
 omstart:
 
   for(;;) {
@@ -3839,7 +3857,7 @@ omstart:
 
     else if(strstr(line,"$Entities")) {
       int numPoints, numCurves, numSurfaces, numVolumes, numEnt;
-      int tag,tagdim,nophys,phystag,maxtag[4];
+      int tag,tagdim,nophys,phystag;
       int nobound, idum;
       Real rdum;
       
@@ -4145,7 +4163,7 @@ omstart:
 	if(k <= 0 || k > maxindx) 
 	  printf("index out of bounds %d\n",k);
 	else if(revindx[k] <= 0) 
-	  printf("unkonwn node %d %d in element %d\n",k,revindx[k],i);
+	  printf("unknown node %d %d in element %d\n",k,revindx[k],i);
 	else 
 	  data->topology[i][j] = revindx[k];
       }      
@@ -4166,13 +4184,455 @@ omstart:
 }
 
 
+static int LoadGmshInput41(struct FemType *data,struct BoundaryType *bound,
+			  char *filename,int info)
+{
+  int noknots = 0,noelements = 0,nophysical = 0,maxnodes,dim,notags;
+  int elemind[MAXNODESD2],elementtype;
+  int i,j,k,l,allocated,*revindx=NULL,maxindx;
+  int elemno, gmshtype, tagphys=0, taggeom=0, tagpart, elemnodes,maxelemtype;
+  int tagmat,verno;
+  int physvolexist, physsurfexist,**tagmap,tagsize,maxtag[4];
+  FILE *in;
+  const char manifoldname[4][10] = {"point", "line", "surface", "volume"};
+  char *cp,line[MAXLINESIZE],longline[LONGLINESIZE];
+
+  if ((in = fopen(filename,"r")) == NULL) {
+    printf("The opening of the mesh file %s failed!\n",filename);
+    return(1);
+  }
+  if(info) printf("Loading mesh in Gmsh format 4.1 from file %s\n",filename);
+
+  allocated = FALSE;
+  dim = data->dim;
+  maxnodes = 0;
+  maxindx = 0;
+  maxelemtype = 0;
+  physvolexist = FALSE;
+  physsurfexist = FALSE;
+  for(i=0;i<4;i++) maxtag[i] = 0;
+
+omstart:
+
+  for(;;) {
+    if(Getrow(line,in,FALSE)) goto end;
+    if(strstr(line,"$End")) continue;
+ 
+    if(strstr(line,"$MeshFormat")) {
+      GETLINE;
+      cp = line;
+      verno = next_int(&cp);
+
+      if(verno != 4) {
+	printf("Version number is not compatible with the parser: %d\n",verno);
+      }
+
+      GETLINE;
+      if(!strstr(line,"$EndMeshFormat")) {
+	printf("$MeshFormat section should end to string $EndMeshFormat:\n%s\n",line);
+      }      
+    }
+      
+    else if(strstr(line,"$Nodes")) {
+      int numEntityBlocks,tagEntity,dimEntity,parEntity,numNodes,ind;
+      int minNodeTag, maxNodeTag, parTag;
+      
+      GETLINE;
+      cp = line;
+
+      numEntityBlocks = next_int(&cp);
+      noknots = next_int(&cp);
+      minNodeTag = next_int(&cp);
+      maxNodeTag = next_int(&cp);
+      
+      if(allocated && info) printf("Reading %d nodes in %d blocks.\n",noknots,numEntityBlocks);
+      
+      k = 0;
+      
+      for(j=1; j <= numEntityBlocks; j++) {
+	GETLINE;
+	cp = line;
+
+	dimEntity = next_int(&cp);
+	tagEntity = next_int(&cp);
+	parTag = next_int(&cp);
+	numNodes = next_int(&cp);
+
+	if( 0 && numNodes > 1 ) printf("Reading node block %d with %d nodes\n",j,numNodes);
+		
+	for(i=1; i <= numNodes; i++) {
+	  GETLINE;
+	  cp = line;
+	  
+	  ind = next_int(&cp);	  
+
+	  if( 0 && numNodes > 1 ) printf("block %d node %d ind %d %d\n",j,i,ind,k+i);
+	  
+	  if(allocated) {
+	    if(maxindx > noknots) revindx[ind] = k+i;
+	  }
+	  else {
+	    maxindx = MAX(ind,maxindx);
+	  }
+	}
+
+	for(i=1; i <= numNodes; i++) {
+	  GETLINE;
+	  cp = line;
+	  
+	  if(allocated) {
+	    data->x[k+i] = next_real(&cp);
+	    data->y[k+i] = next_real(&cp);
+	    if(dim > 2) data->z[k+i] = next_real(&cp);
+	  }
+	}
+	k += numNodes;	
+      }
+      GETLINE;
+
+      if(!strstr(line,"$EndNodes")) {
+	printf("$Nodes section should end to string $EndNodes:\n%s\n",line);
+      }           
+    }
+
+    else if(strstr(line,"$Entities")) {
+      int numPoints, numCurves, numSurfaces, numVolumes, numEnt;
+      int tag,tagdim,nophys,phystag;
+      int nobound, idum;
+      Real rdum;
+      
+      GETLINE;
+      cp = line;
+      numPoints = next_int(&cp);
+      numCurves = next_int(&cp);
+      numSurfaces = next_int(&cp);
+      numVolumes = next_int(&cp);
+
+      if(allocated) {
+	tagsize = 0;
+	for(tagdim=0;tagdim<=3;tagdim++)
+	  tagsize = MAX( tagsize, maxtag[tagdim]);
+	if(info) printf("Allocating lookup table for tags of size %d\n",tagsize);
+	if( tagsize > 0 ) {
+	  tagmap = Imatrix(0,3,1,tagsize);
+	  for(i=0;i<=3;i++)
+	    for(j=1;j<=tagsize;j++)
+	      tagmap[i][j] = 0;
+	}
+      }
+      
+      for(tagdim=0;tagdim<=3;tagdim++) {	
+	
+	if( tagdim == 0 ) 
+	  numEnt = numPoints;
+	else if( tagdim == 1 )
+	  numEnt = numCurves;
+	else if( tagdim == 2 )
+	  numEnt = numSurfaces;
+	else if( tagdim == 3 )
+	  numEnt = numVolumes;
+	
+	if(!allocated)
+	  maxtag[tagdim] = 0;
+	else if( maxtag[tagdim] > 0 )
+	  printf("Maximum original tag for %d %dDIM entities is %d\n",numEnt,tagdim,maxtag[tagdim]);
+
+	if(numEnt > 0 && !allocated) printf("Reading %d entities in %dD\n",numEnt,tagdim);
+
+	
+	for(i=1; i <= numEnt; i++) {
+	  GETLONGLINE;
+
+	  // if( i==1 ) printf("1st line of dim %d with %d entries: %s\n",tagdim,numEnt,line);
+	  
+	  if( tagdim == 0 ) continue;
+	  
+	  cp = longline;
+	  tag = next_int(&cp);
+	 	  
+	  if(!allocated)
+	    maxtag[tagdim] = MAX( maxtag[tagdim], tag );
+	  
+	  for(j=1;j<=6;j++) rdum = next_real(&cp);
+	  nophys = next_int(&cp);
+
+	  if( nophys > 0 )
+	    phystag = next_int(&cp);
+	  else
+	    phystag = 0;
+	  
+	  if(allocated) tagmap[tagdim][tag] = phystag;
+
+
+	  // The lines may be too long. So fill the string buffer until we get a newline. 
+	  j = k = 0;
+	  for(;;) { 
+	    for(l=0;l<LONGLINESIZE;l++) {
+	      if( longline[l] == '\n') {
+		j = l;
+	    	break;	    
+	      }
+	    }
+	    if(j) break;
+	    k += LONGLINESIZE;
+	    GETLONGLINE;
+	  }	   	    	      
+	  if( k > 0 && !allocated) printf("Entity line %d has length %d.\n",i,k+j);
+	  
+	  //for(j=2;j<=nophys;j++)
+	  //  idum = next_int(&cp);
+
+	  //// if( tagdim == 0 ) continue;
+
+	  //nobound = next_int(&cp);
+	  // for(j=1;j<=nobound;j++)
+	  //  idum = next_int(&cp);	  
+	}
+      }
+      
+      GETLONGLINE;
+      if(!strstr(longline,"$EndEntities")) {
+	printf("$Entities section should end to string $EndEntities:\n%s\n",longline);
+      }           
+    }
+
+    else if(strstr(line,"$Elements")) {
+      int numEntityBlocks, numElements, tagEntity, dimEntity, typeEle, NumElements;
+      int minElementTag, maxElementTag;
+      
+      GETLINE;
+      cp = line;
+
+      k = 0;
+      numEntityBlocks = next_int(&cp);
+      noelements = next_int(&cp);
+      minElementTag = next_int(&cp);
+      maxElementTag = next_int(&cp);
+      
+      if(allocated) printf("Reading %d elements in %d blocks.\n",noelements,numEntityBlocks);
+
+      
+      for(j=1; j<= numEntityBlocks; j++ ) {
+	
+	GETLINE;	
+	cp = line;
+
+	dimEntity = next_int(&cp);
+	tagEntity = next_int(&cp);
+	typeEle = next_int(&cp);
+	numElements = next_int(&cp);
+	
+	elementtype = GmshToElmerType(typeEle);
+	elemnodes = elementtype % 100;
+	maxelemtype = MAX(maxelemtype,elementtype);
+	
+	if( allocated && tagsize > 0 ) {
+	  printf("Reading %d elements with tag %d of type %d\n", numElements, tagEntity, elementtype);
+	  if( tagsize > 0 ) {
+	    if( tagmap[dimEntity][tagEntity] ) {
+	      printf("Mapping mesh tag %d to physical tag %d in %dDIM\n",tagEntity,tagmap[dimEntity][tagEntity],dimEntity);	    
+	      tagEntity = tagmap[dimEntity][tagEntity];
+	    }
+	    else {
+	      printf("Mesh tag %d is not associated to any physical tag!\n",tagEntity);
+	    }
+	  }
+	}
+			     
+	for(i=1; i <= numElements; i++) {
+	  GETLINE;	
+	  cp = line;
+
+	  k += 1;
+	  	  
+	  elemno = next_int(&cp);
+	  
+	  if(allocated) {
+	    data->elementtypes[k] = elementtype;
+	    data->material[k] = tagEntity;
+	    for(l=0;l<elemnodes;l++)
+	      elemind[l] = next_int(&cp);
+
+	    GmshToElmerIndx(elementtype,elemind);	  
+
+	    for(l=0;l<elemnodes;l++)
+	      data->topology[k][l] = elemind[l];
+	  }	
+	}
+      }
+
+      GETLINE;
+      if(!strstr(line,"$EndElements")) {
+	printf("$Elements section should end to string $EndElements:\n%s\n",line);
+      }   
+    }
+
+    else if(strstr(line,"$PhysicalNames")) {
+      GETLINE;
+      cp = line;
+      nophysical = next_int(&cp);
+      for(i=0;i<nophysical;i++) {
+	GETLINE;
+        if(allocated) {
+	  cp = line;
+	  gmshtype = next_int(&cp);
+	  tagphys = next_int(&cp);
+	  if(gmshtype == dim-1) {
+	    physsurfexist = TRUE;
+	    if(tagphys < MAXBCS) {
+	      sscanf(cp," \"%[^\"]\"",data->boundaryname[tagphys]);
+	      printf("Boundary name for physical group %d is: %s\n",tagphys,data->boundaryname[tagphys]);
+	    }
+	    else
+	      printf("Index %d too high: ignoring physical %s %s",tagphys,manifoldname[dim-1],cp+1);
+	  }
+	  else if(gmshtype == dim) {
+	    physvolexist = TRUE;
+	    if(tagphys < MAXBODIES) {
+	      sscanf(cp," \"%[^\"]\"",data->bodyname[tagphys]);
+	      printf("Body name for physical group %d is: %s\n",tagphys,data->bodyname[tagphys]);
+	    }
+	    else
+	      printf("Index %d too high: ignoring physical %s %s",tagphys,manifoldname[dim],cp+1);
+	  }
+	  else printf("Physical groups of dimension %d not supported in %d-dimensional mesh: "
+		      "ignoring group %d %s",gmshtype,dim,tagphys,cp+1);
+        }
+      }
+
+      GETLINE;
+      if(!strstr(line,"$EndPhysicalNames")) {
+	printf("$PhysicalNames section should end to string $EndPhysicalNames:\n%s\n",line);
+      }   
+    }
+    else if(strstr(line,"$Periodic")) {
+      int numPeriodicLinks;
+      if(allocated) printf("Reading periodic links but doing nothing with them!\n");
+      
+      GETLINE;
+      cp = line;
+      numPeriodicLinks = next_int(&cp);
+      for(i=1; i <= numPeriodicLinks; i++) {
+	GETLINE;
+      }     
+      GETLINE;
+      if(!strstr(line,"$EndPeriodic")) {
+	printf("$Periodic section should end to string $EndPeriodic:\n%s\n",line);
+      }           
+    }
+
+    else if(strstr(line,"$PartitionedEntities")) {
+      if(allocated) printf("Reading partitioned entities but doing nothing with them!\n");      
+      for(;;) {
+	GETLINE;
+	if(strstr(line,"$EndPartitionedEntities")) break;
+      }
+    }
+    else if(strstr(line,"$NodeData")) {
+      if(allocated) printf("Reading node data but doing nothing with them!\n");      
+      for(;;) {
+	GETLINE;
+	if(strstr(line,"$EndNodeData")) break;
+      }
+    }
+    else if(strstr(line,"$ElementData")) {
+      if(allocated) printf("Reading element data but doing nothing with them!\n");      
+      for(;;) {
+	GETLINE;
+	if(strstr(line,"$EndElementData")) break;
+      }
+    }
+    else if(strstr(line,"$ElementNodeData")) {
+      if(allocated) printf("Reading element node data but doing nothing with them!\n");      
+      for(;;) {
+	GETLINE;
+	if(strstr(line,"$EndElementNodeData")) break;
+      }
+    }
+    else if(strstr(line,"$GhostElements")) {
+      if(allocated) printf("Reading ghost elements data but doing nothing with them!\n");      
+      for(;;) {
+	GETLINE;
+	if(strstr(line,"$EndGhostElements")) break;
+      }
+    }
+    else if(strstr(line,"$InterpolationScheme")) {
+      if(allocated) printf("Reading interpolation scheme but doing nothing with them!\n");      
+      for(;;) {
+	GETLINE;
+	if(strstr(line,"$EndInterpolationScheme")) break;
+      }
+    }    
+    else {
+      if(allocated) printf("Untreated command: %s",line);
+    }
+
+  }
+
+ end:
+
+
+  if(!allocated) {
+    if( noelements == 0 ) bigerror("No elements to load in Gmsh file!");
+    if( noknots == 0 ) bigerror("No nodes to load in Gmsh file!");
+
+    maxnodes = maxelemtype % 100;
+    InitializeKnots(data);
+    data->dim = dim;
+    data->maxnodes = maxnodes;
+    data->noelements = noelements;
+    data->noknots = noknots;
+
+    if(info) printf("Allocating for %d knots and %d elements.\n",noknots,noelements);
+    AllocateKnots(data);
+
+    if(maxindx > noknots) {
+      revindx = Ivector(1,maxindx);
+      for(i=1;i<=maxindx;i++) revindx[i] = 0;
+    }
+    rewind(in);
+    allocated = TRUE;
+    goto omstart;
+  }
+
+  if(maxindx > noknots) {
+    printf("Renumbering the Gmsh nodes from %d to %d\n",maxindx,noknots);
+
+    for(i=1; i <= noelements; i++) {
+      elementtype = data->elementtypes[i];
+      elemnodes = elementtype % 100; 
+
+      for(j=0;j<elemnodes;j++) {
+	k = data->topology[i][j];
+	if(k <= 0 || k > maxindx) 
+	  printf("index out of bounds %d\n",k);
+	else if(revindx[k] <= 0) 
+	  printf("unknown node %d %d in element %d\n",k,revindx[k],i);
+	else 
+	  data->topology[i][j] = revindx[k];
+      }      
+    }
+    free_Ivector(revindx,1,maxindx);
+  }
+
+  ElementsToBoundaryConditions(data,bound,FALSE,info);
+
+  data->bodynamesexist = physvolexist;
+  data->boundarynamesexist = physsurfexist;
+  
+  if( tagsize > 0 ) free_Imatrix(tagmap,0,3,1,tagsize);
+  
+  if(info) printf("Successfully read the mesh from the Gmsh input file.\n");
+
+  return(0);
+}
 
 int LoadGmshInput(struct FemType *data,struct BoundaryType *bound,
 		   char *prefix,int info)
 {
   FILE *in;
   char line[MAXLINESIZE],filename[MAXFILESIZE];
-  int errno;
+  int errnum;
 
   sprintf(filename,"%s",prefix);
   if ((in = fopen(filename,"r")) == NULL) {
@@ -4190,19 +4650,30 @@ int LoadGmshInput(struct FemType *data,struct BoundaryType *bound,
   }
 
   if(strstr(line,"$")) {
-    int verno;
+    int verno,minorno;
     char *cp;
     
     Getrow(line,in,FALSE);
     cp = line;    
     verno = next_int(&cp);
+    cp++;
+    minorno = next_int(&cp);
+
+    if(info) printf("Gmsh version is %d.%d\n",verno,minorno);
+    
     fclose(in);
     
-    if( verno == 4 )
-      errno = LoadGmshInput4(data,bound,filename,info);
-    else      
-      errno = LoadGmshInput2(data,bound,filename,info);
-    
+    if( verno == 4 ) {
+      if( minorno == 0 ) 
+	errnum = LoadGmshInput4(data,bound,filename,info);
+      else if( minorno == 1 ) 
+	errnum = LoadGmshInput41(data,bound,filename,info);
+      else
+	printf("Minor version not yet supported, cannot continue!\n");
+    }
+    else {
+      errnum = LoadGmshInput2(data,bound,filename,info);
+    }      
   } else {
     fclose(in);
     printf("*****************************************************\n");
@@ -4211,10 +4682,149 @@ int LoadGmshInput(struct FemType *data,struct BoundaryType *bound,
     printf("Please use Gsmh 2 or 4 versions for output\n");
     printf("*****************************************************\n");
     
-    errno = LoadGmshInput1(data,bound,filename,info);
+    errnum = LoadGmshInput1(data,bound,filename,info);
   }     
 
-  return(errno);
+  return(errnum);
+}
+
+
+
+int LoadFvcomMesh(struct FemType *data,struct BoundaryType *bound,
+		  char *filename,int info)
+{
+  int noknots = 0,noelements = 0,maxnodes,dim;
+  int elemind[MAXNODESD2],elementtype;
+  int i,j,k,allocated,*revindx=NULL,maxindx;
+  int elemnodes,maxelemtype,elemtype0,bclines;
+  int usetaggeom,tagmat,bccount;
+  int *bcinds,*bctags,nbc,nbc0,bc_id;
+  FILE *in;
+  char *cp,line[MAXLINESIZE];
+
+
+  if ((in = fopen(filename,"r")) == NULL) {
+    printf("LoadFVCOMInput: The opening of the FVCOM mesh file %s failed!\n",filename);
+    return(1);
+  }
+  if(info) printf("Loading mesh in FVCOM format from file %s\n",filename);
+
+  allocated = FALSE;
+  dim = 2;
+  maxnodes = 0;
+  maxindx = 0;
+  maxelemtype = 303;
+  usetaggeom = FALSE;
+
+  noelements = 0;
+  bclines = 0;
+    
+  
+omstart:
+
+  noelements = 0;
+  noknots = 0;
+  nbc = 0;
+  nbc0 = 1;
+  bclines = 0;
+  bccount = 0;
+  
+  for(;;) {
+    if(Getrow(line,in,FALSE)) goto end;
+    if(line[0]=='\0') goto end;
+    
+    if(memcmp(line,"E3T",3) == 0 ) {
+      noelements += 1;
+      if(allocated) {
+	cp = line+4;
+	i = next_int(&cp);
+	if(i != noelements ) printf("Invalid element number: %d %d\n",noelements,i);		  
+
+	data->elementtypes[i] = 303;
+	for(k=0;k<3;k++)
+	  data->topology[i][k] = next_int(&cp);
+	data->material[i] = next_int(&cp);
+      }
+    }
+    else if(memcmp(line,"ND",2) == 0 ) {
+      noknots += 1;
+      if(allocated) {
+	cp = line+3;
+	i = next_int(&cp);
+	if(i != noknots ) printf("Invalid node number: %d %d\n",noknots,i);	
+	data->x[i] = next_real(&cp);
+	data->y[i] = next_real(&cp);
+	if(dim > 2) data->z[i] = next_real(&cp);
+      }
+    }
+    else if(memcmp(line,"NS",2) == 0 ) {
+      bclines += 1;
+      
+      if(allocated){
+	cp = line+3;
+
+	for(i=0;i<10;i++) {
+	  j = next_int(&cp);
+
+	  nbc += 1;
+	  bcinds[nbc] = abs(j);
+	  
+	  if( j < 0 ) {
+	    bccount += 1;
+	    bc_id = next_int(&cp);
+
+	    for(k=nbc0;k<=nbc;k++)
+	      bctags[k] = bc_id;	    
+
+	    nbc0 = nbc+1;
+	    break;
+	  }
+	}	
+      }
+    }
+    else if(memcmp(line,"MESH2D",6) == 0 ) {
+      if(!allocated) printf("Yes, we have MESH2D as we should\n");
+    }
+    else if(memcmp(line,"MESHNAME",8) == 0 ) {
+      if(!allocated) printf("Mesh name found but not used: %s\n",line+9);
+    }
+  }
+
+ end:
+
+
+  if(!allocated) {
+    maxnodes = maxelemtype % 100;
+    InitializeKnots(data);
+    data->dim = dim;
+    data->maxnodes = maxnodes;
+    data->noelements = noelements;
+    data->noknots = noknots;    
+    
+    if(info) printf("Allocating for %d knots and %d elements.\n",noknots,noelements);
+    AllocateKnots(data);
+    
+    printf("Number of BC lines: %d\n",bclines);
+    bcinds = Ivector(1,10*bclines);        
+    bctags = Ivector(1,10*bclines);
+    for(i=1;i<=10*bclines;i++) bcinds[i] = bctags[i] = 0;
+    
+    rewind(in);
+    allocated = TRUE;
+    goto omstart;
+  }
+
+  printf("Number of different BCs: %d\n",bccount);  
+  printf("Number of BC nodes: %d\n",nbc);  
+
+  NodesToBoundaryChain(data,bound,bcinds,bctags,nbc,bccount,info);
+
+  free_Ivector(bcinds,1,10*bclines);
+  free_Ivector(bctags,1,10*bclines);
+  
+  if(info) printf("Successfully read the mesh from the FVCOM file!\n");
+
+  return(0);
 }
 
 
@@ -4351,7 +4961,7 @@ omstart:
 	if(k <= 0 || k > maxindx) 
 	  printf("index out of bounds %d\n",k);
 	else if(revindx[k] <= 0) 
-	  printf("unkonwn node %d %d in element %d\n",k,revindx[k],i);
+	  printf("unknown node %d %d in element %d\n",k,revindx[k],i);
 	else 
 	  data->topology[i][j] = revindx[k];
       }      
@@ -4382,6 +4992,7 @@ static int UnvToElmerType(int unvtype)
 
   case 22:
   case 23:
+  case 24:
     elmertype = 203;
     break;
 
@@ -4437,18 +5048,22 @@ static int UnvToElmerType(int unvtype)
     elmertype = 510;
     break;
 
+  case 101:
   case 112:
     elmertype = 706;
     break;
 
+  case 102:
   case 113:
     elmertype = 715;
     break;
 
+  case 104:
   case 115:
     elmertype = 808;
     break;
 
+  case 105:
   case 116:
     elmertype = 820;
     break;
@@ -4554,7 +5169,7 @@ int LoadUniversalMesh(struct FemType *data,struct BoundaryType *bound,
   int reordernodes,reorderelements,nogroups,maxnodeind,maxelem,elid,unvtype,elmertype;
   int nonodes,group,grouptype,mode,nopoints,nodeind,matind,physind,colorind;
   int minelemtype,maxelemtype,physoffset=0,doscaling=FALSE;
-  int debug,mingroup,maxgroup,minphys,maxphys,nogroup,noentities,dummy;
+  int debug,mingroup,maxgroup,minphys,maxphys,nogroup,noentities,dummy,isbeam;
   int *u2eind=NULL,*u2eelem=NULL;
   int *elementtypes;
   char filename[MAXFILESIZE],line[MAXLINESIZE],*cp;
@@ -4568,7 +5183,7 @@ int LoadUniversalMesh(struct FemType *data,struct BoundaryType *bound,
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"unv");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadUniversalMesh: opening of the universal mesh file '%s' wasn't succesfull !\n",
+      printf("LoadUniversalMesh: opening of the universal mesh file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -4703,18 +5318,6 @@ omstart:
 	  if(0) printf("elem = %d %d %d %d\n",noelements,unvtype,physind,matind);
 	}	
 
-	if (!allocated) {
-	  minphys = MIN( minphys, physind );
-	  maxphys = MAX( maxphys, physind );	 
-	  maxnodes = MAX(maxnodes, nonodes);
-	  if(elid != noelements) reorderelements = TRUE;
-	  maxelem = MAX(maxelem, elid);
-	}
-	
-	if(unvtype == 11 || unvtype == 21 || unvtype == 22 ) Getrow(line,in,FALSE);
-	Getrow(line,in,FALSE);
-	cp = line;
-
 	elmertype = UnvToElmerType(unvtype); 
 	if(!elmertype) {
 	  printf("Unknown elementtype %d %d %d %d %d %d %d\n",
@@ -4722,6 +5325,21 @@ omstart:
 	  printf("line %d: %s\n",linenumber,line);
 	  bigerror("done");
 	}
+
+	if (!allocated) {
+	  minphys = MIN( minphys, physind );
+	  maxphys = MAX( maxphys, physind );	 
+	  maxnodes = MAX(maxnodes, nonodes);
+	  if(elid != noelements) reorderelements = TRUE;
+	  maxelem = MAX(maxelem, elid);
+	}
+
+	/* For beam elements there is a stupid additional row filled with zeros? */
+	isbeam = ( elmertype / 100 == 2);
+	if(isbeam)Getrow(line,in,FALSE);
+	
+	Getrow(line,in,FALSE);
+	cp = line;
 
 	if(elmertype == 510 ) 	   
 	  lines = 1;
@@ -5145,7 +5763,7 @@ int LoadCGsimMesh(struct FemType *data,char *prefix,int info)
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"plt");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadCGsimMesh: opening of the CGsim mesh file '%s' wasn't succesfull !\n",
+      printf("LoadCGsimMesh: opening of the CGsim mesh file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -5237,7 +5855,7 @@ omstart:
 
   if(!allocated) {
     if(noknots == 0 || noelements == 0 || maxnodes == 0) {
-       printf("Invalid mesh consits of %d knots and %d %d-node elements.\n",
+       printf("Invalid mesh consists of %d knots and %d %d-node elements.\n",
 	     noknots,noelements,maxnodes);     
        fclose(in);
        return(2);
@@ -5323,7 +5941,7 @@ int LoadFluxMesh(struct FemType *data,struct BoundaryType *bound,
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"TRA");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadFluxMesh: opening of the Flux mesh file '%s' wasn't succesfull !\n",
+      printf("LoadFluxMesh: opening of the Flux mesh file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -5660,7 +6278,7 @@ int LoadFluxMesh3D(struct FemType *data,struct BoundaryType *bound,
   if ((in = fopen(filename,"r")) == NULL) {
     AddExtension(prefix,filename,"PF3");
     if ((in = fopen(filename,"r")) == NULL) {
-      printf("LoadFluxMesh3D: opening of the Flux mesh file '%s' wasn't succesfull !\n",
+      printf("LoadFluxMesh3D: opening of the Flux mesh file '%s' wasn't successful !\n",
 	     filename);
       return(1);
     }
@@ -5743,12 +6361,12 @@ int LoadFluxMesh3D(struct FemType *data,struct BoundaryType *bound,
 	if( i != j ) {
 	  printf("It seems that reordering of elements should be performed! (%d %d)\n",i,j);
 	}
-	next_int(&cp);              //2 internal elemnt type description
-	next_int(&cp);              //3 internal elemnt type description
+	next_int(&cp);              //2 internal element type description
+	next_int(&cp);              //3 internal element type description
 	matind = next_int(&cp);     //4 number of the belonging region
 	dimplusone = next_int(&cp); //5 dimensiality 4-3D 3-2D
 	next_int(&cp);              //6 zero here always
-	next_int(&cp);              //7 internal elemnt type description
+	next_int(&cp);              //7 internal element type description
 	nonodes = next_int(&cp);    //8 number of nodes
 		
 	elmertype = FluxToElmerType3D( nonodes, dimplusone-1 );

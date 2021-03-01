@@ -49,15 +49,15 @@
 #include "HYPRE.h"
 #include "HYPRE_parcsr_ls.h"
 
-#ifdef USE_ISO_C_BINDINGS
 #define realtime_ FC_FUNC_(realtime,REALTIME)
-#endif
 typedef struct {
 
 int ilower, iupper;
 
 HYPRE_IJMatrix A;
 HYPRE_IJMatrix Atilde;
+
+HYPRE_IJVector x,b;
 
 int hypre_method;
 HYPRE_Solver solver, precond;
@@ -455,14 +455,19 @@ void STDCALLBULL FC_FUNC(solvehypre1,SOLVEHYPRE1)
    /* No preconditioner for BoomerAMG */
    if( hypre_sol == 1 ) hypre_pre = -1;
 
-   ilower=1000000000;
-   iupper=0;
+   ilower =  1000000000;
+   iupper = -1;
    for( i=0; i<local_size; i++ ) {
      if ( owner[i] ) {
-       if ( iupper < globaldofs[i] ) iupper=globaldofs[i];
-       if ( ilower > globaldofs[i] ) ilower=globaldofs[i];
+       if ( iupper < globaldofs[i] ) iupper = globaldofs[i];
+       if ( ilower > globaldofs[i] ) ilower = globaldofs[i];
      }
    }
+
+
+   /* if the partition doesn't own any of the dofs, apply null range (with valid indices) */
+   if ( iupper == -1 ) { ilower = 1; iupper = 0; }
+
    
    /* Create the matrix.
       Note that this is a square matrix, so we indicate the row partition
@@ -873,6 +878,8 @@ void STDCALLBULL FC_FUNC(solvehypre1,SOLVEHYPRE1)
    Container->iupper = iupper;     
    Container->hypre_method = *hypre_method;
    Container->A = A;
+   Container->b = b;
+   Container->x = x;
    Container->Atilde = Atilde;
    Container->solver = solver;
    Container->precond = precond;
@@ -1140,6 +1147,13 @@ void STDCALLBULL FC_FUNC(solvehypre4,SOLVEHYPRE4)(int** ContainerPtr) {
    if (Container->Atilde != Container->A) {
      HYPRE_IJMatrixDestroy(Container->Atilde);
    }
+
+   if (Container->A) {
+     HYPRE_IJMatrixDestroy(Container->A);
+   }
+   if(Container->x) HYPRE_IJVectorDestroy(Container->x);
+   if(Container->b) HYPRE_IJVectorDestroy(Container->b);
+
    free(Container);
    *ContainerPtr = NULL;
 }

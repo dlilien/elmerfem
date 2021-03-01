@@ -39,7 +39,7 @@ MODULE BlockSolve
   LOGICAL, PRIVATE :: isParallel=.FALSE.
 
   TYPE(Variable_t), POINTER :: SolverVar => Null()
-  TYPE(Matrix_t), POINTER :: SolverMatrix => Null()
+  TYPE(Matrix_t), POINTER :: SolverMatrix => Null(), SaveMatrix
 
 CONTAINS
 
@@ -326,7 +326,7 @@ CONTAINS
 
     ! We may have different size of block matrix than the number of actual components.
     ! For example, when we have a projector of a scalar field our block size is (2,2)
-    ! but we can only crate the (1,1) from the initial matrix system. 
+    ! but we can only create the (1,1) from the initial matrix system. 
     IF( PRESENT( FieldDofs ) ) THEN
       CALL Info('BlockInitMatrix','Number of field components: '//TRIM(I2S(FieldDofs)))
       IF( Novar /= FieldDofs ) CALL Info('BlockInitMatrix','Number of fields and blocks ('&
@@ -456,7 +456,7 @@ CONTAINS
       VarName = ComponentName("Block variable",i)            
       Var => VariableGet( Mesh % Variables, VarName )
       IF(.NOT. ASSOCIATED( Var ) ) THEN
-        CALL Info('BlockInitMatrix','Variable > '//TRIM(VarName)//' < does not exist, creating')
+        CALL Info('BlockInitVar','Variable > '//TRIM(VarName)//' < does not exist, creating')
         PSolver => Solver
         NULLIFY( Vals )
         ALLOCATE( Vals(n) )
@@ -582,11 +582,11 @@ CONTAINS
           IF( Amat % NumberOfRows > 0 ) THEN
             SumAbsMat = SUM( ABS( Amat % Values ) )
             IF( SumAbsMat < SQRT( TINY( SumAbsMat ) ) ) THEN
-              CALL Info('BlockSolver','Matrix is actually all zero, eliminating it!',Level=20)
+              CALL Info('BlockSolver','Matrix is actually all zero, eliminating it!',Level=12)
               DEALLOCATE( Amat % Values ) 
               IF( .NOT. ReuseMatrix ) THEN
                 DEALLOCATE( Amat % Rows, Amat % Cols )
-                IF( RowVar == ColVar ) DEALLOCATE( Amat % Diag )
+                IF( RowVar == ColVar ) DEALLOCATE( Amat % Diag, Amat % rhs ) 
               END IF
               Amat % NumberOfRows = 0
             END IF
@@ -691,7 +691,85 @@ CONTAINS
 
   END SUBROUTINE BlockPickDofsPhysical
     
+
+
+  !-------------------------------------------------------------------------------------
+  !> Picks the components of a full matrix to given domains or bodies.
+  !> The rest stays in 1st domain.
+  !-------------------------------------------------------------------------------------
+  SUBROUTINE BlockPickHdiv( Solver, BlockIndex, NoVar )
     
+    TYPE(Solver_t), POINTER :: Solver
+    INTEGER, POINTER :: BlockIndex(:)
+    INTEGER :: Novar
+    
+    INTEGER :: i,j,n,nn,ne,nf,nb,nnis,neis,nfis,nbis
+    INTEGER :: nncount,necount,nfcount,nbcount
+    TYPE(Mesh_t), POINTER :: Mesh
+    LOGICAL :: Found
+    INTEGER, POINTER :: Perm(:)
+    
+    
+    CALL Info('BlockSolver','Picking block matrix for mixed hdiv solver',Level=10)
+
+    Mesh => Solver % Mesh
+    nn = Mesh % NumberOfNodes
+    ne = Mesh % NumberOfEdges
+    nf = Mesh % NumberOfFaces
+    nb = Mesh % NumberOfBulkElements
+
+    ! true/false flags whether dof type exists
+    nnis = 0
+    neis = 0
+    nfis = 0
+    nbis = 0
+
+    ! counter of types of dofs
+    nncount = 0
+    necount = 0
+    nfcount = 0
+    nbcount = 0
+    
+    Perm => Solver % Variable % Perm 
+    n = SIZE( Perm ) 
+
+    DO i=1,n
+      j = Perm(i)
+      IF( j == 0 ) CYCLE
+
+      IF( i <= nn ) THEN
+        nnis = 1
+        nncount = nncount + 1
+        BlockIndex(j) = 1
+      ELSE IF( i <= nn + ne ) THEN
+        neis = 1
+        necount = necount + 1
+        BlockIndex(j) = nnis + 1
+      ELSE IF( i <= nn + ne + nf ) THEN
+        nfis = 1
+        nfcount = nfcount + 1
+        BlockIndex(j) = nnis + neis + 1
+      ELSE
+        nbis = 1
+        nbcount = nbcount + 1
+        BlockIndex(j) = nnis + neis + nfis + 1
+      END IF
+    END DO
+
+    IF( nncount > 0 ) CALL Info('BlockSolver','Number of nodal dofs: '//TRIM(I2S(nncount)),Level=8)
+    IF( necount > 0 ) CALL Info('BlockSolver','Number of edge dofs: '//TRIM(I2S(necount)),Level=8)
+    IF( nfcount > 0 ) CALL Info('BlockSolver','Number of face dofs: '//TRIM(I2S(nfcount)),Level=8)
+    IF( nbcount > 0 ) CALL Info('BlockSolver','Number of elemental dofs: '//TRIM(I2S(nbcount)),Level=8)
+       
+    NoVar = nnis + neis + nfis + nbis
+
+    CALL Info('BlockSolver','Found dofs related to '//TRIM(I2S(NoVar))//' groups',Level=6)
+    
+  END SUBROUTINE BlockPickHdiv
+  
+
+
+  
   !-------------------------------------------------------------------------------------
   !> Picks the components of a full matrix when blockindex table is given.
   !-------------------------------------------------------------------------------------
@@ -1138,7 +1216,7 @@ CONTAINS
         
         IF( Dperm(i) < 1 .OR. DPerm(k) < 1 ) THEN
           PRINT *,'ik',Dperm(i),Dperm(k)
-          STOP
+          STOP EXIT_ERROR
         END IF
         CALL AddToMatrixElement(B,Dperm(i),DPerm(k),A % Values(j))
       END DO
@@ -1487,13 +1565,13 @@ CONTAINS
     TYPE(Solver_t) :: Solver
     INTEGER :: Novar
 
-    INTEGER :: i, RowVar, ColVar
+    INTEGER :: i, RowVar, ColVar, CopyVar
     CHARACTER(LEN=max_name_len) :: str
     REAL(KIND=dp) :: Coeff
     LOGICAL :: GotIt, GotIt2
     INTEGER, POINTER :: VarPerm(:)
     TYPE(ValueList_t), POINTER :: Params
-    TYPE(Matrix_t), POINTER :: Amat
+    TYPE(Matrix_t), POINTER :: Amat, PMat
     TYPE(Variable_t), POINTER :: AVar
     
     
@@ -1526,6 +1604,21 @@ CONTAINS
           CALL MassMatrixAssembly( Solver, VarPerm, Amat )
           Amat % Values = Coeff * Amat % Values
         END IF
+      END IF
+
+      WRITE (str,'(A,I0)') 'Prec Matrix Diagonal ',RowVar
+      Coeff = ListGetCReal( Params, TRIM(str), GotIt)
+      IF( GotIt ) THEN
+        CopyVar = NoVar+1 - RowVar
+        PMat => TotMatrix % Submatrix(RowVar,CopyVar) % Mat
+        Amat => TotMatrix % Submatrix(RowVar,RowVar) % PrecMat 
+        CALL Info('BlockPrecMatrix','Creating preconditioner from matrix ('&
+            //TRIM(I2S(RowVar))//','//TRIM(I2S(CopyVar))//')',Level=6)
+        PRINT *,'proj matrix sum:',SUM( ABS( PMat % Values ) ) 
+        PRINT *,'orig diag matrix sum:',SUM( ABS( TotMatrix % Submatrix(RowVar,RowVar) % Mat % Values ) )
+        
+        CALL DiagonalMatrixSumming( Solver, PMat, Amat )
+        Amat % Values = Coeff * Amat % Values
       END IF
     END DO
     
@@ -1637,6 +1730,82 @@ CONTAINS
   END SUBROUTINE FsiCouplingBlocks
     
 
+  !> Create the coupling between elasticity solvers of various types.
+  !--------------------------------------------------------------------------------
+  SUBROUTINE StructureCouplingBlocks( Solver )
+
+    TYPE(Solver_t) :: Solver
+    
+    INTEGER :: i,j,k,ind1,ind2,Novar
+    INTEGER, POINTER :: ConstituentSolvers(:)
+    LOGICAL :: Found
+    TYPE(ValueList_t), POINTER :: Params
+    TYPE(Matrix_t), POINTER :: A_fs, A_sf, A_s, A_f
+    TYPE(Variable_t), POINTER :: FVar, SVar
+    LOGICAL :: IsPlate, IsShell, IsBeam, IsSolid, GotBlockSolvers
+
+    
+    Params => Solver % Values
+    ConstituentSolvers => ListGetIntegerArray(Params, 'Block Solvers', GotBlockSolvers)
+
+    ! Currently we simply assume the master solver to be listed as the first entry in
+    ! the 'Block Solvers' array.
+    i = 1
+    
+    DO k = 1, 4
+      IsSolid = .FALSE.
+      IsPlate = .FALSE.
+      IsShell = .FALSE.
+      IsBeam = .FALSE.
+      
+      IF(k==1) j = ListGetInteger( Params,'Solid Solver Index',IsSolid)
+      IF(k==2) j = ListGetInteger( Params,'Plate Solver Index',IsPlate)
+      IF(k==3) j = ListGetInteger( Params,'Shell Solver Index',IsShell)
+      IF(k==4) j = ListGetInteger( Params,'Beam Solver Index',IsBeam)
+
+      IF(j==0) CYCLE
+      
+      IF (GotBlockSolvers) THEN
+        IF (j > size(ConstituentSolvers)) CALL Fatal('StructureCouplingBlocks', &
+            'Solid/Plate/Shell/Beam Solver Index larger than Block Solvers array')
+        ind1 = ConstituentSolvers(i)
+        ind2 = ConstituentSolvers(j)
+        CALL Info('StructureCouplingBlocks','Generating coupling between solvers '&
+            //TRIM(I2S(ind1))//' and '//TRIM(I2S(ind2)))
+      ELSE
+        IF (j > Solver % BlockMatrix % NoVar) CALL Fatal('StructureCouplingBlocks', &
+            'Solid/Plate/Shell/Beam Solver Index exceeds block matrix dimensions')
+            
+        CALL Info('StructureCouplingBlocks','Generating coupling between solvers '&
+            //TRIM(I2S(i))//' and '//TRIM(I2S(j)))
+      END IF
+
+      A_fs => TotMatrix % Submatrix(j,i) % Mat
+      A_sf => TotMatrix % Submatrix(i,j) % Mat
+      
+      SVar => TotMatrix % Subvector(i) % Var
+      FVar => TotMatrix % Subvector(j) % Var
+      
+      A_s => TotMatrix % Submatrix(i,i) % Mat
+      A_f => TotMatrix % Submatrix(j,j) % Mat
+      
+      IF(.NOT. ASSOCIATED( SVar ) ) THEN
+        CALL Fatal('StructureCouplingBlocks','Master structure variable not present!')
+      END IF
+      IF(.NOT. ASSOCIATED( FVar ) ) THEN
+        CALL Fatal('StructureCouplingBlocks','Slave structure variable not present!')
+      END IF
+      
+      CALL StructureCouplingAssembly( Solver, FVar, SVar, A_f, A_s, A_fs, A_sf, &
+          IsSolid, IsPlate, IsShell, IsBeam )
+      !IF (IsShell) THEN
+      !  CALL StructureCouplingAssembly_defutils( Solver, FVar, SVar, A_f, A_s, A_fs, A_sf, &
+      !      IsSolid, IsPlate, IsShell, IsBeam)
+      !END IF
+    END DO
+      
+  END SUBROUTINE StructureCouplingBlocks
+  
   
   !------------------------------------------------------------------------------          
   !> Compute the rhs for the block matrix system which is solved
@@ -2083,14 +2252,16 @@ CONTAINS
     CALL Info('BlockMatrixScaling','Starting block matrix row equilibriation',Level=10)
            
     IF( PRESENT( Reverse ) ) THEN
-      CALL Info('BlockMatrixScaling','Performing reverse scaling',Level=20)
       BackScale = Reverse
     ELSE
-      CALL Info('BlockMatrixScaling','Performing forward scaling',Level=20)
       BackScale = .FALSE.
     END IF
+    IF (BackScale) THEN
+      CALL Info('BlockMatrixScaling','Performing reverse scaling',Level=20)
+    ELSE
+      CALL Info('BlockMatrixScaling','Performing forward scaling',Level=20)
+    END IF
 
-    
     NoVar = TotMatrix % NoVar   
     DO k=1,NoVar
       
@@ -2195,14 +2366,10 @@ CONTAINS
     TYPE(Variable_t), POINTER :: Var, Var_save
 
     LOGICAL :: GotOrder, BlockGS, Found, NS, ScaleSystem, DoSum, &
-        IsComplex, BlockScaling, DiagScaling, UsePrecMat
+        IsComplex, BlockScaling, DiagScaling, ThisScaling, UsePrecMat
     CHARACTER(LEN=MAX_NAME_LEN) :: str
-#ifndef USE_ISO_C_BINDINGS
-    INTEGER(KIND=AddrInt) :: AddrFunc
-#else
     INTEGER(KIND=AddrInt) :: AddrFunc
     EXTERNAL :: AddrFunc
-#endif
 
     CALL Info('BlockMatrixPrec','Starting block matrix preconditioning',Level=6)
 
@@ -2238,12 +2405,13 @@ CONTAINS
     IF( DiagScaling .AND. BlockScaling ) THEN
       CALL Warn('BlockMatrixPrec','It is not recommended to use two different scalings at same time')
     END IF
-    
+
     
 #define SOLSYS
 #ifdef SOLSYS
-    IF (isParallel) &
+    IF (isParallel) THEN
       ALLOCATE( x(TotMatrix % MaxSize), b(TotMatrix % MaxSize) )
+    END IF
 #endif
 
     ! Initial guess 
@@ -2265,8 +2433,10 @@ CONTAINS
       END IF
       
       WRITE(Message,'(A,I0)') 'Solving block: ',i
-      CALL Info('BlockMatrixPrec',Message,Level=6)
+      CALL Info('BlockMatrixPrec',Message,Level=8)
 
+      CALL ListPushNameSpace('block '//TRIM(i2s(i))//TRIM(i2s(i))//':')
+      
       ! Set pointers to the new linear system
       !-------------------------------------------------------------------
       Var => TotMatrix % SubVector(i) % Var
@@ -2330,9 +2500,8 @@ CONTAINS
         END DO
       END IF
       
-      CALL ListPushNameSpace('block '//TRIM(i2s(i))//TRIM(i2s(i))//':')
-
       ! We do probably not want to compute the change within each iteration
+      CALL ListAddLogical( Asolver % Values,'Skip Advance Nonlinear iter',.TRUE.)         
       CALL ListAddLogical( Asolver % Values,'Skip Compute Nonlinear Change',.TRUE.)         
         
       ! Revert back if the matrix was set not complex
@@ -2344,21 +2513,24 @@ CONTAINS
 
       IF( BlockScaling ) CALL BlockMatrixScaling(.TRUE.,i,i,b,UsePrecMat)
 
-      IF( DiagScaling .AND. UsePrecMat ) THEN
+      ThisScaling = ListGetLogical( Params,'Linear System Scaling',Found )
+      IF( .NOT. Found ) ThisScaling = DiagScaling
+      
+      IF( ThisScaling .AND. UsePrecMat ) THEN
         n = A % NumberOfRows
         ALLOCATE( diagtmp(n), btmp(n) )
 
         IF( TotMatrix % GotBlockStruct ) THEN
           k = TotMatrix % InvBlockStruct(i)
           IF( k <= 0 ) THEN
-            CALL Fatal('BlockMatrixPrec','Cannot define the originating block for scaling!')
+            CALL Fatal('BlockMatrixPrec','Cannot define the originating block '&
+                //TRIM(I2S(i))//' for scaling!')
           END IF
-          l = SIZE( TotMatrix % BlockStruct ) 
         ELSE
           k = i
-          l = NoVar
         END IF
 
+        l = Solver % Variable % DOFs
         Diagtmp(1:n) = Solver % Matrix % DiagScaling(k::l)
 
         ! Scale x & b to the unscaled system of the tailored preconditioning matrix for given block.
@@ -2403,7 +2575,7 @@ CONTAINS
       
       IF( BlockScaling ) CALL BlockMatrixScaling(.FALSE.,i,i,b,UsePrecMat)
 
-      IF( DiagScaling .AND. UsePrecMat ) THEN
+      IF( ThisScaling .AND. UsePrecMat ) THEN
         x(1:n) = x(1:n) / diagtmp(1:n)
         DEALLOCATE( diagtmp, btmp )
       END IF
@@ -2524,6 +2696,7 @@ CONTAINS
     CALL ListPopNameSpace('block:') ! block:
 
     CALL ListAddLogical( Params,'Linear System Refactorize',.FALSE. )
+    CALL ListAddLogical( Asolver % Values,'Skip Advance Nonlinear iter',.FALSE.)
     CALL ListAddLogical( Asolver % Values,'Skip Compute Nonlinear Change',.FALSE.)
 
       
@@ -2533,10 +2706,10 @@ CONTAINS
     Solver % Variable => Var_save
 
     IF( BlockGS ) THEN
-      DEALLOCATE( vtmp, rtmp ) 
+      DEALLOCATE( vtmp, rtmp, xtmp ) 
     END IF
 
-    CALL Info('BlockMatrixPrec','Finished block matrix preconditioning',Level=6)
+    CALL Info('BlockMatrixPrec','Finished block matrix preconditioning',Level=8)
     
   END SUBROUTINE BlockMatrixPrec
 
@@ -2723,9 +2896,7 @@ CONTAINS
     REAL(KIND=dp) :: MaxChange
 
     INTEGER(KIND=AddrInt) :: AddrFunc
-#ifdef USE_ISO_C_BINDINGS
     EXTERNAL :: AddrFunc
-#endif
     INTEGER(KIND=AddrInt) :: iterProc,precProc, mvProc,dotProc,nmrProc, zero=0
     REAL(KIND=dp) :: dpar(20), xnorm,prevxnorm
     REAL(KIND=dp), ALLOCATABLE :: x(:),b(:),r(:)
@@ -2736,7 +2907,8 @@ CONTAINS
     INTEGER :: NoVar, ndim, maxsize
     LOGICAL :: Converged, Diverged
     INTEGER :: Rounds, OutputInterval, PolynomialDegree
-    INTEGER, POINTER :: Offset(:),poffset(:),BlockStruct(:)
+    INTEGER, POINTER :: Offset(:),BlockStruct(:)
+    INTEGER, ALLOCATABLE, TARGET :: poffset(:)
     INTEGER :: i,j,k,l,ia,ib,istat
     LOGICAL :: LS, BlockAV,Found
 
@@ -2752,7 +2924,7 @@ CONTAINS
     NoVar = TotMatrix % NoVar
 
     CALL Info('BlockKrylovIter','Allocating temporal vectors for block system of size: '&
-        //TRIM(I2S(ndim)),Level=8)
+        //TRIM(I2S(ndim)),Level=10)
 
     ALLOCATE(x(ndim), b(ndim),r(ndim),STAT=istat)
     IF( istat /= 0 ) THEN
@@ -2950,6 +3122,230 @@ CONTAINS
   END SUBROUTINE blockKrylovIter
 
 
+  !> This makes the system monolithic. If it was initially monolithic
+  !> and then made block, it does not make any sense. However, for
+  !> multiphysics coupled cases it may be a good strategy. 
+  !-----------------------------------------------------------------
+  SUBROUTINE BlockMonolithicSolve( Solver, MaxChange )
+
+    TYPE(Solver_t) :: Solver
+    REAL(KIND=dp) :: MaxChange
+
+    INTEGER :: i,j,k,m,n,NoVar,NoCol,NoRow,NoEigen,vdofs,comp
+    INTEGER, POINTER :: BlockOrder(:)
+    LOGICAL :: GotIt
+    REAL(KIND=dp), POINTER CONTIG :: rhs_save(:), b(:)
+    REAL(KIND=dp), POINTER :: CollX(:), rhs(:)
+    TYPE(Matrix_t), POINTER :: A, mat_save
+    TYPE(Variable_t), POINTER :: Var, CompVar, SolverVar
+    TYPE(Variable_t), TARGET :: MonolithicVar
+    REAL(KIND=dp) :: TotNorm
+    TYPE(ValueList_t), POINTER :: Params
+    TYPE(Matrix_t), POINTER :: CollMat
+    LOGICAL :: Found, HaveMass, HaveDamp, Visited = .FALSE.
+    CHARACTER(LEN=max_name_len) :: CompName
+    CHARACTER(*), PARAMETER :: Caller = 'BlockMonolithicSolve'
+
+    SAVE Visited, CollMat, CollX, HaveMass, HaveDamp
+    
+    CALL Info(Caller,'Solving block matrix as monolithic!',Level=6)
+    
+    NoVar = TotMatrix % NoVar
+    Params => Solver % Values
+    SolverVar => Solver % Variable
+    Solver % Variable => MonolithicVar
+    
+    IF(.NOT. Visited ) THEN
+      Visited = .TRUE.
+      n = 0
+      m = 0
+
+      CollMat => AllocateMatrix()
+      HaveMass = .FALSE.
+      HaveDamp = .FALSE.
+      
+      DO NoRow = 1,NoVar 
+        rhs => TotMatrix % SubVector(NoRow) % rhs      
+        A => TotMatrix % SubMatrix( NoRow, NoRow ) % Mat
+        n = n + A % NumberOfRows
+
+        DO NoCol = 1,NoVar
+          A => TotMatrix % SubMatrix( NoRow, NoCol ) % Mat
+          IF( ASSOCIATED( A ) ) THEN
+            m = m + SIZE( A % Values )
+            IF( ASSOCIATED( A % MassValues ) ) HaveMass = .TRUE.
+            IF( ASSOCIATED( A % DampValues ) ) HaveDamp = .TRUE.
+         END IF
+        END DO                
+      END DO
+
+      CollMat % NumberOfRows = n 
+      CALL Info(Caller,'Size of monolithic matrix: '//TRIM(I2S(n)),Level=7)
+      CALL Info(Caller,'Number of nonzeros in monolithic matrix: '//TRIM(I2S(m)),Level=7)
+      
+      ALLOCATE( CollMat % rhs(n), CollMat % Diag(n), CollMat % Rows(n+1), CollX(n) )
+      CollMat % rhs = 0.0_dp
+      CollMat % Diag = 0
+      CollMat % Rows = 0
+      CollX = 0.0_dp
+      
+      ALLOCATE( CollMat % Values(m), CollMat % Cols(m+1) )
+      CollMat % Values = 0.0_dp
+      CollMat % Cols = 0
+
+      IF( HaveMass ) THEN
+        ALLOCATE( CollMat % MassValues(m) )
+        CollMat % MassValues = 0.0_dp
+      END IF
+      IF( HaveDamp ) THEN
+        ALLOCATE( CollMat % DampValues(m) )
+        CollMat % DampValues = 0.0_dp
+      END IF
+      
+      k = 0
+      CollMat % Rows(1) = 1
+      
+      DO NoRow = 1,NoVar
+        n = TotMatrix % Offset(NoRow)
+        
+        A => TotMatrix % SubMatrix( NoRow, NoRow ) % Mat
+        m = A % NumberOfRows
+        
+        DO i=1,m
+          DO NoCol = 1,NoVar
+            A => TotMatrix % SubMatrix( NoRow, NoCol ) % Mat
+            IF( ASSOCIATED( A ) ) THEN
+              IF( SIZE(A % Rows) < i+1 ) CYCLE 
+              DO j=A % Rows(i),A % Rows(i+1)-1
+                k = k + 1
+                CollMat % Values(k) = A % Values(j)
+                CollMat % Cols(k) = TotMatrix % Offset(NoCol) + A % Cols(j) 
+                IF( HaveMass ) THEN
+                  IF( ASSOCIATED( A % MassValues ) ) THEN
+                    CollMat % MassValues(k) = A % MassValues(j)
+                  END IF
+                END IF
+                IF( HaveDamp ) THEN
+                  IF( ASSOCIATED( A % DampValues ) ) THEN
+                    CollMat % DampValues(k) = A % DampValues(j)
+                  END IF
+                END IF
+              END DO
+              IF( ASSOCIATED( A % rhs ) ) THEN
+                CollMat % rhs(n+i) = A % rhs(i)
+              END IF
+            END IF
+          END DO
+          CollMat % Rows(n+i+1) = k+1
+        END DO
+      END DO
+
+      MonolithicVar % Name = '' ! Some name needed to avoid an uninitialised value error
+      MonolithicVar % Values => CollX
+      MonolithicVar % Dofs = 1
+      MonolithicVar % Perm => NULL()
+
+      NoEigen = Solver %  NOFEigenValues
+      IF( NoEigen > 0 ) THEN
+        n = CollMat % NumberOfRows
+        ALLOCATE( MonolithicVar % EigenValues(NoEigen), MonolithicVar % EigenVectors(NoEigen,n) )
+        MonolithicVar % EigenValues = 0.0_dp
+        MonolithicVar % EigenVectors = 0.0_dp
+      END IF 
+    ELSE
+      k = 0
+      
+      DO NoRow = 1,NoVar
+        n = TotMatrix % Offset(NoRow) 
+
+        A => TotMatrix % SubMatrix( NoRow, NoRow ) % Mat
+        m = A % NumberOfRows
+        
+        DO i=1,m
+          DO NoCol = 1,NoVar
+            A => TotMatrix % SubMatrix( NoRow, NoCol ) % Mat
+            IF( ASSOCIATED( A ) ) THEN
+              IF( SIZE(A % Rows) < i+1 ) CYCLE 
+              DO j=A % Rows(i),A % Rows(i+1)-1
+                k = k + 1
+                CollMat % Values(k) = A % Values(j)
+                IF( HaveMass ) THEN
+                  IF( ASSOCIATED( A % MassValues ) ) THEN
+                    CollMat % MassValues(k) = A % MassValues(j)
+                  END IF
+                END IF
+                IF( HaveDamp ) THEN
+                  IF( ASSOCIATED( A % DampValues ) ) THEN
+                    CollMat % DampValues(k) = A % DampValues(j)
+                  END IF
+                END IF                
+              END DO
+              IF( ASSOCIATED( A % rhs ) ) THEN
+                CollMat % rhs(n+i) = A % rhs(i)
+              END IF              
+            END IF
+          END DO
+        END DO
+      END DO      
+    END IF
+
+    CALL Info(Caller,'Copying block solution to monolithic vector',Level=12)
+    DO i=1,NoVar
+      Var => TotMatrix % SubVector(i) % Var 
+      n = SIZE( Var % Values )       
+      m = TotMatrix % Offset(i)
+      CollX(m+1:m+n) = Var % Values(1:n) 
+    END DO
+    
+    ! Solve monolithic matrix equation. 
+    CALL SolveLinearSystem( CollMat, CollMat % rhs, CollX, TotNorm, 1, Solver )
+
+    CALL Info(Caller,'Copying monolithic vector to block solutions',Level=12)
+
+    ! Copy the 1st eigenmode because this will be used for norms etc. 
+    NoEigen = Solver % NOFEigenValues
+    IF( NoEigen > 0 ) THEN
+      MonolithicVar % Values = REAL( MonolithicVar % EigenVectors(1,:) ) 
+    END IF
+    
+    DO i=1,NoVar
+      Var => TotMatrix % SubVector(i) % Var 
+      n = SIZE( Var % Values ) 
+      m = TotMatrix % Offset(i)
+      Var % Values(1:n) = CollX(m+1:m+n) 
+
+      IF( NoEigen > 0 ) THEN
+        IF(.NOT. ASSOCIATED( Var % EigenValues ) ) THEN
+          IF( ASSOCIATED( Var % Solver ) ) THEN
+            Var % Solver % NOFEigenValues = NoEigen
+          END IF
+          ALLOCATE( Var % EigenValues(NoEigen), Var % EigenVectors(NoEigen,n) )
+          Var % EigenValues = 0.0_dp
+          Var % EigenVectors = 0.0_dp
+
+          vdofs = Var % Dofs
+          IF( vdofs > 1 ) THEN
+            DO comp=1,vdofs
+              Compname = ComponentName(Var % Name,comp)
+              CompVar => VariableGet( Solver % Mesh % Variables, Compname )
+              CompVar % EigenValues => Var % EigenValues
+              CompVar % EigenVectors => Var % EigenVectors(:,comp::vdofs)
+            END DO
+          END IF
+        END IF
+ 
+        DO k=1,NoEigen
+          Var % EigenValues(k) = MonolithicVar % EigenValues(k)
+          Var % EigenVectors(k,1:n) = MonolithicVar % EigenVectors(k,m+1:m+n)
+        END DO
+        
+      END IF
+    END DO
+
+    Solver % Variable => SolverVar
+    
+  END SUBROUTINE BlockMonolithicSolve
+
 
 !------------------------------------------------------------------------------
 !> An alternative handle for the block solvers to be used by the legacy matrix
@@ -2966,7 +3362,7 @@ CONTAINS
     TYPE(Variable_t), POINTER :: Var
     INTEGER :: i,j,k,l,n,nd,NonLinIter,tests,NoTests,iter
     LOGICAL :: GotIt, GotIt2, BlockPrec, BlockGS, BlockJacobi, BlockAV, &
-        BlockHorVer, BlockCart, BlockNodal, BlockDomain
+        BlockHdiv, BlockHorVer, BlockCart, BlockNodal, BlockDomain
     INTEGER :: ColVar, RowVar, NoVar, BlockDofs, VarDofs
     
     REAL(KIND=dp) :: NonlinearTol, Norm, PrevNorm, Residual, PrevResidual, &
@@ -2976,14 +3372,14 @@ CONTAINS
     REAL(KIND=dp), POINTER CONTIG :: SaveRHS(:)
     CHARACTER(LEN=max_name_len) :: str, VarName, ColName, RowName
     LOGICAL :: Robust, LinearSearch, ErrorReduced, IsProcedure, ScaleSystem,&
-        ReuseMatrix, LS, BlockScaling
+        ReuseMatrix, LS, BlockScaling, BlockMonolithic, Found
     INTEGER :: HaveConstraint, HaveAdd
     INTEGER, POINTER :: VarPerm(:)
     INTEGER, POINTER :: SlaveSolvers(:)
     LOGICAL :: GotSlaveSolvers, SkipVar
     
     
-    TYPE(Matrix_t), POINTER :: Amat, SaveMatrix, SaveCM
+    TYPE(Matrix_t), POINTER :: Amat, SaveCM
     TYPE(Mesh_t), POINTER :: Mesh
     TYPE(ValueList_t), POINTER :: Params
 
@@ -3007,6 +3403,8 @@ CONTAINS
       BlockPrec = .TRUE.
     END IF
 
+    BlockMonolithic = ListGetLogical( Params,'Block Monolithic',GotIt)
+    
     BlockScaling = ListGetLogical( Params,'Block Scaling',GotIt)
 
     ! Block iteration style: jacobi vs. gauss-seidel
@@ -3015,6 +3413,7 @@ CONTAINS
 
     ! Different strategies on how to split the initial monolithic matrix into blocks
     BlockAV = ListGetLogical( Params,'Block A-V System', GotIt)
+    BlockHdiv = ListGetLogical( Params,'Block Hdiv system',GotIt)
     BlockNodal = ListGetLogical( Params,'Block Nodal System', GotIt)
     BlockHorVer = ListGetLogical( Params,'Block Hor-Ver System', GotIt)
     BlockCart = ListGetLogical( Params,'Block Cartesian System', GotIt)
@@ -3029,6 +3428,12 @@ CONTAINS
       ALLOCATE( BlockIndex(n) )
       BlockDofs = 0
       CALL BlockPickDofsPhysical( PSolver, BlockIndex, BlockDofs )  
+      SkipVar = .TRUE.
+    ELSE IF( BlockHdiv ) THEN
+      n = MAXVAL( Solver % Variable % Perm )
+      ALLOCATE( BlockIndex(n) )
+      BlockDofs = 0
+      CALL BlockPickHdiv( PSolver, BlockIndex, BlockDofs )  
       SkipVar = .TRUE.
     ELSE IF( BlockAV .OR. BlockNodal .OR. BlockHorVer ) THEN
       BlockDofs = 2
@@ -3073,7 +3478,7 @@ CONTAINS
     SolverMatrix % RHS => b
     
     IF( .NOT. GotSlaveSolvers ) THEN    
-      IF( BlockDomain ) THEN
+      IF( BlockDomain .OR. BlockHdiv ) THEN
         CALL BlockPickMatrixPerm( Solver, BlockIndex, VarDofs )
         DEALLOCATE( BlockIndex ) 
       ELSE IF( BlockAV ) THEN
@@ -3097,7 +3502,12 @@ CONTAINS
       CALL BlockPrecMatrix( Solver, VarDofs ) 
     END IF
 
-    CALL FsiCouplingBlocks( Solver )
+    ! Currently we cannot have both structure-structure and fluid-structure couplings!
+    IF( ListGetLogical( Solver % Values,'Structure-Structure Coupling',Found ) ) THEN
+      CALL StructureCouplingBlocks( Solver )
+    ELSE
+      CALL FsiCouplingBlocks( Solver )
+    END IF
     
     IF( HaveConstraint > 0 ) THEN
       CALL BlockPickConstraint( Solver, VarDofs )
@@ -3127,6 +3537,8 @@ CONTAINS
               ParEnv = Amat % ParMatrix % ParEnv
             END IF
           END IF
+
+          Solver % Variable  => SolverVar
         END DO
       END DO
     END IF
@@ -3157,7 +3569,9 @@ CONTAINS
       
       TotNorm = DefaultSolve()
       MaxChange = Solver % Variable % NonlinChange 
-      
+    ELSE IF( BlockMonolithic ) THEN
+      CALL Info('BlockSolverInt','Using monolithic strategy for the block',Level=6)        
+      CALL BlockMonolithicSolve( Solver, MaxChange )      
     ELSE IF( BlockPrec ) THEN
       CALL Info('BlockSolverInt','Using block preconditioning strategy',Level=6)        
       CALL BlockKrylovIter( Solver, MaxChange )
