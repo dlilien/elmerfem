@@ -897,7 +897,7 @@ CONTAINS
 !    
 !    Integration stuff
 !    
-     IF (Bubbles) THEN
+     IF ( Bubbles ) THEN
       NBasis = 2*n
       IntegStuff = GaussPoints( Element, Element % Type % GaussPoints2 )
      ELSE
@@ -923,7 +923,7 @@ CONTAINS
 !     Basis function values & derivatives at the integration point
 !------------------------------------------------------------------------------
       stat = ElementInfo( Element,Nodes,u,v,w,SqrtElementMetric, &
-            Basis,dBasisdx,ddBasisddx,.FALSE.,.TRUE. )
+            Basis,dBasisdx,ddBasisddx,.FALSE.,Bubbles=Bubbles )
 
       s = SqrtElementMetric * S_Integ(t)
 !------------------------------------------------------------------------------
