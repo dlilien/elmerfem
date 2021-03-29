@@ -106,6 +106,10 @@
      REAL(KIND=dp), POINTER :: DSValues(:)
      INTEGER, POINTER :: DSPerm(:)
 
+     TYPE(Variable_t), POINTER :: StrainHeatVar 
+     REAL(KIND=dp), POINTER :: SHValues(:)
+     INTEGER, POINTER :: SHPerm(:)
+
      TYPE(Variable_t), POINTER :: StrainRateVar 
      REAL(KIND=dp), POINTER :: SRValues(:)
      INTEGER, POINTER :: SRPerm(:)
@@ -226,6 +230,13 @@
       IF ( ASSOCIATED( DevStressVar ) ) THEN
       DSPerm => DevStressVar % Perm    
       DSValues => DevStressVar % Values  
+      END IF
+
+      StrainHeatVar => &
+               VariableGet(Solver % Mesh % Variables,'StrainHeat')
+      IF ( ASSOCIATED( StrainHeatVar ) ) THEN
+      SHPerm => StrainHeatVar % Perm    
+      SHValues => StrainHeatVar % Values  
       END IF
       
       IF ( CurrentCoordinateSystem() == AxisSymmetric ) THEN
@@ -725,6 +736,7 @@
              END DO
            END IF
 
+
           END DO
         END DO
 
@@ -745,8 +757,34 @@
                 SpinVAlues = SpinValues / RefSpin
             END WHERE
         END IF
-        
-    END IF
+
+        IF (ASSOCIATED(StrainHeatVar).AND.ASSOCIATED(StrainRateVar).AND.ASSOCIATED(DevStressVar)) THEN
+            DO i=1,n
+             SHValues(SHPerm(NodeIndexes(i))) =  0.0_dp
+             comp=0
+             DO j=1,2*dim
+               comp=comp+1
+               SHValues(SHPerm(NodeIndexes(i)))=SHValues(SHPerm(NodeIndexes(i)))+&
+               SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+comp) * DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+comp)
+               ! Off diagonal elements are repeated
+               IF (comp.GE.4) THEN
+                 SHValues(SHPerm(NodeIndexes(i)))=SHValues(SHPerm(NodeIndexes(i)))+&
+                 SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+comp) *&
+                 DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+comp)
+               END IF
+             END DO
+
+             ! For some reason this needs to be normalized
+             SHValues(SHPerm(NodeIndexes(i)))=SHValues(SHPerm(NodeIndexes(i)))-&
+             (SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+1) +&
+             SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+2) +&
+             SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+3)) *&
+             (DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+1) +&
+             DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+2) +&
+             DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+3))
+           END DO
+         END IF
+     END IF
 
 !------------------------------------------------------------------------------
 !  END  Compute the StrainRate and Deviatoric Stress
@@ -1390,9 +1428,9 @@ CONTAINS
         END DO
       ELSE
         epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
-        DO i=1,dim 
-          StrainRate(i,i) = StrainRate(i,i) - epsi/dim
-        END DO
+        ! DO i=1,dim 
+        !   StrainRate(i,i) = StrainRate(i,i) - epsi/dim
+        ! END DO
       END IF
 
 !
@@ -1427,6 +1465,9 @@ CONTAINS
       D(4) = 2. * StrainRate(1,2)
       D(5) = 2. * StrainRate(2,3)
       D(6) = 2. * StrainRate(3,1)
+      DO i=1,dim 
+         D(i) = D(i) - epsi/dim
+      END DO
       
       INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
       INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
