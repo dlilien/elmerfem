@@ -77,13 +77,13 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
   TYPE(Matrix_t),POINTER :: StiffMatrix
   
   INTEGER :: i, j, k, l, n, t, iter, NDeg
-  INTEGER :: dim, STDOFs, LocalNodes, istat
+  INTEGER :: dim, STDOFs, LocalNodes, istat, spoofdim
   
   TYPE(ValueList_t),POINTER :: Material, BC, BodyForce
   TYPE(Nodes_t) :: ElementNodes
   TYPE(Element_t),POINTER :: CurrentElement
   
-  REAL(KIND=dp) :: RelativeChange, UNorm, PrevUNorm
+  REAL(KIND=dp) :: RelativeChange, UNorm=0.0, PrevUNorm=0.0
   
   REAL(KIND=dp), ALLOCATABLE :: Basis(:),ddBasisddx(:,:,:)
   REAL(KIND=dp), ALLOCATABLE :: dBasisdx(:,:)
@@ -130,6 +130,16 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
   REAL(KIND=dp), ALLOCATABLE:: LocalFluidity(:), &
        LocalTemperature(:), K1(:), K2(:), E1(:), &
        E2(:), E3(:)
+
+  ! And variables to spoof the dimension
+  CHARACTER(LEN=MAX_NAME_LEN) :: OOPlaneRotVar13, OOPLaneRotVar23
+  REAL(KIND=dp), ALLOCATABLE :: LocalOOP13(:), LocalOOP23(:)
+  LOGICAL :: OOPlaneRot13, OOPlaneRot23
+  TYPE(Variable_t), POINTER :: OOPlaneRotSol13, OOPlaneRotSol23
+  REAL(KIND=dp), POINTER :: OOPlaneRotValues13(:), OOPlaneRotValues23(:)
+
+
+  INTEGER, POINTER :: OOPlaneRotPerm13(:), OOPlaneRotPerm23(:)
   
 #ifdef USE_ISO_C_BINDINGS
   REAL(KIND=dp) :: at, at0
@@ -139,16 +149,19 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
 !------------------------------------------------------------------------------
   SAVE NumberOfBoundaryNodes, BoundaryReorder, BoundaryNormals, &
        BoundaryTangent1, BoundaryTangent2, ViscosityFile, Wn, FabricGrid, &
-       MinSRInvariant, LocalTemperature, K1, K2, E1, E2, E3
+       MinSRInvariant, LocalTemperature, K1, K2, E1, E2, E3, N, UnFoundFatal, &
+       LocalFluidity
+
+  SAVE Spoofdim, LocalOOP13, LocalOOP23
   
   SAVE Basis, dBasisdx, ddBasisddx
   SAVE LocalMassMatrix, LocalStiffMatrix, LocalForce, &
        ElementNodes,  &
        AllocationsDone,  &
-       old_body
+       old_body, Unorm, PrevUnorm
   
   SAVE LocalVelo, LocalP, dim
-  dim = CoordinateSystemDimension()
+
 
       Wn(7) = GetConstReal( Model % Constants, 'Gas Constant', GotIt )
       IF (.NOT.GotIt) THEN
@@ -184,6 +197,34 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
   END IF
   WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
   CALL INFO('DeformationalHeatAI', Message , level = 20)
+
+  OOPlaneRotVar23 = ListGetString( SolverParams,'OOPlane23 Strain Name',GotIt,UnFoundFatal=.FALSE.)
+  IF (.NOT.GotIt) THEN
+      OOPlaneRot23 = .FALSE.
+      OOPlaneRotVar23 = 'Dummy'
+  ELSE
+      OOPlaneRot23 = .TRUE.
+      OOPlaneRotSol23 => VariableGet( Solver % Mesh % Variables, OOPLaneRotVar23 )
+      IF ( ASSOCIATED( OOPlaneRotSol23) ) THEN
+        OOPlaneRotPerm23 => OOPlaneRotSol23 % Perm
+        OOPlaneRotValues23 => OOPlaneRotSol23 % Values
+      END IF
+  END IF
+  WRITE(Message,'(A,A)') 'OOPlane23 variable = ', OOPlaneRotVar23
+  CALL INFO('DeformationalHeatAI', Message , level = 20)
+
+  OOPlaneRotVar13 = ListGetString( SolverParams,'OOPlane13 Strain Name',GotIt,UnFoundFatal=.FALSE.)
+  IF (.NOT.GotIt) THEN
+      OOPlaneRot13 = .FALSE.
+      OOPlaneRotVar13 = 'Dummy'
+  ELSE
+      OOPlaneRot13 = .TRUE.
+      OOPlaneRotSol13 => VariableGet( Solver % Mesh % Variables, OOPLaneRotVar13 )
+      IF ( ASSOCIATED( OOPlaneRotSol13) ) THEN
+        OOPlaneRotPerm13 => OOPlaneRotSol13 % Perm
+        OOPlaneRotValues13 => OOPlaneRotSol13 % Values
+      END IF
+  END IF
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
@@ -206,7 +247,12 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
 !------------------------------------------------------------------------------
   IF ( .NOT. AllocationsDone .OR. Solver % MeshChanged) THEN
      N = Model % MaxElementNodes
-     
+     dim = CoordinateSystemDimension()
+      IF ( OOPlaneRot13 .OR. OOPlaneRot23 ) THEN
+        spoofdim = dim + 1
+      ELSE
+        spoofdim = dim
+      END IF
      IF ( AllocationsDone ) THEN
         DEALLOCATE( ElementNodes % x,     &
              ElementNodes % y,     &
@@ -219,6 +265,7 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
              LocalForce,           &
              K1, K2, E1, E2, E3,   &
              LocalTemperature,     &
+             LocalOOP23,LocalOOP13,&
              LocalFluidity )
      END IF
 
@@ -230,8 +277,9 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
           LocalMassMatrix( 2*STDOFs*N,2*STDOFs*N ),  &
           LocalStiffMatrix( 2*STDOFs*N,2*STDOFs*N ),  &
           LocalForce( 2*STDOFs*N ),  &
-          LocalTemperature(N), &
           K1( N ), K2( N ), E1( N ), E2( N ), E3( N ), &
+          LocalTemperature(N), &
+          LocalOOP13(N), LocalOOP23(N), &
           LocalFluidity(N), STAT=istat )
 
      IF ( istat /= 0 ) THEN
@@ -261,13 +309,11 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
      CALL Info( 'DeformationalHeatAI', ' ', Level=4 )
      CALL Info( 'DeformationalHeatAI', 'Starting assembly...',Level=4 )
 
-     PrevUNorm = UNorm
-
 !------------------------------------------------------------------------------
         CALL DefaultInitialize()
 !------------------------------------------------------------------------------
-        DO t=1,Solver % NumberOFActiveElements
 
+        DO t=1,Solver % NumberOFActiveElements
            IF ( RealTime() - at0 > 1.0 ) THEN
               WRITE(Message,'(a,i3,a)' ) '   Assembly: ',  &
                    INT(100.0 - 100.0 * (Solver % NumberOfActiveElements-t) / &
@@ -326,10 +372,19 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
            
            LocalP(1:n) = FlowValues((dim+1)*FlowPerm(NodeIndexes(1:n)))
 
+          If ( OOPlaneRot13 ) THEN
+             LocalOOP13 = 0.0_dp
+             LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
+          END IF
+          If ( OOPlaneRot23 ) THEN
+             LocalOOP23 = 0.0_dp
+             LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
+          END IF
+
            CALL LocalAIMatrix(LocalMassMatrix, LocalStiffMatrix, LocalForce, &
                 K1, K2, E1, E2, E3, Wn, MinSRInvariant, LocalVelo, LocalP, &
                 LocalFluidity, LocalTemperature, CurrentElement, n, &
-                ElementNodes, Isotropic)
+                ElementNodes, Isotropic, OOPlaneRot13, OOPlaneRot23, LocalOOP13, LocalOOP13)
 
 !------------------------------------------------------------------------------
 !        Update global matrices from local matrices 
@@ -455,7 +510,8 @@ SUBROUTINE GetMaterialDefs()
   SUBROUTINE LocalAIMatrix(MassMatrix, StiffMatrix, ForceVector, &
        NodalK1, NodalK2, NodalE1, NodalE2, NodalE3, Wn, MinSRInvariant, &
        NodalVelo, NodalP, NodalFluidity, &
-       NodalTemp, Element, n, Nodes, isotropic )
+       NodalTemp, Element, n, Nodes, isotropic, OOPlaneRot13, OOPlaneRot23, &
+       NodalOOP13, NodalOOP23 )
 !------------------------------------------------------------------------------
     
     USE MaterialModels
@@ -471,6 +527,9 @@ SUBROUTINE GetMaterialDefs()
     REAL(KIND=dp) :: NodalK1(:), NodalK2(:)
     REAL(KIND=dp) :: NodalE1(:), NodalE2(:), NodalE3(:)
     REAL(KIND=dp) :: NodalFluidity(:), NodalTemp(:)
+
+    REAL(KIND=dp) :: NodalOOP13(:), NodalOOP23(:)
+    LOGICAL :: OOPlaneRot13, OOPlaneRot23
 !------------------------------------------------------------------------------
 !
     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
@@ -502,6 +561,8 @@ SUBROUTINE GetMaterialDefs()
     REAL(KIND=dp) :: Bg, BGlenT, ss, nn
     LOGICAL :: Isotropic
 
+    INTEGER :: spoofdim
+
      INTERFACE
       Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
          USE Types
@@ -522,6 +583,12 @@ SUBROUTINE GetMaterialDefs()
 !------------------------------------------------------------------------------
     dim = CoordinateSystemDimension()
     
+    IF ((OOPlaneRot13).OR.( OOPlaneRot23 )) THEN
+          SpoofDim = dim + 1
+    ELSE
+          SpoofDim = dim
+    END IF
+
     ForceVector = 0.0_dp
     StiffMatrix = 0.0_dp
     MassMatrix  = 0.0_dp
@@ -552,6 +619,16 @@ SUBROUTINE GetMaterialDefs()
        
        LGrad = MATMUL( NodalVelo(:,1:n), dBasisdx(1:n,:) )
        StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
+      ! If we are adding in manual spins, do it here before the stress
+      ! calculations
+      IF ( OOPlaneRot23 ) THEN
+          StrainRate(2, 3) = SUM( NodalOOP23(1:n) * Basis(1:n) )
+          StrainRate(3, 2) = StrainRate(2, 3)
+      END IF
+      IF ( OOPlaneRot13 ) THEN
+          StrainRate(3, 1) = SUM( NodalOOP13(1:n) * Basis(1:n) )
+          StrainRate(1, 3) = StrainRate(3, 1)
+      END IF
        StressTensor = 0.0_dp
 
        Temp = SUM( NodalTemp(1:n)*Basis(1:n) )
@@ -568,7 +645,7 @@ SUBROUTINE GetMaterialDefs()
         a2(5) = SUM( NodalE2(1:n) * Basis(1:n) )
         a2(6) = SUM( NodalE3(1:n) * Basis(1:n) )
       
-        CALL R2Ro(a2,dim,dim,ai,Angle)
+        CALL R2Ro(a2,dim,spoofdim,ai,Angle)
         CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
          
 !
@@ -581,8 +658,8 @@ SUBROUTINE GetMaterialDefs()
       D(5) = 2. * StrainRate(2,3)
       D(6) = 2. * StrainRate(3,1)
       
-      DO k = 1, 2*dim
-        DO j = 1, 2*dim
+      DO k = 1, 2*spoofdim
+        DO j = 1, 2*spoofdim
           StressTensor( INDx(k),INDy(k) ) = &
           StressTensor( INDx(k),INDy(k) ) + C(k,j) * D(j)
         END DO
