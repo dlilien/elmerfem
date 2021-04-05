@@ -150,7 +150,7 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
   SAVE NumberOfBoundaryNodes, BoundaryReorder, BoundaryNormals, &
        BoundaryTangent1, BoundaryTangent2, ViscosityFile, Wn, FabricGrid, &
        MinSRInvariant, LocalTemperature, K1, K2, E1, E2, E3, N, UnFoundFatal, &
-       LocalFluidity
+       LocalFluidity, Isotropic
 
   SAVE Spoofdim, LocalOOP13, LocalOOP23
   
@@ -362,6 +362,14 @@ RECURSIVE SUBROUTINE DeformationalHeatSolverAI( Model,Solver,dt,TransientSimulat
              E1(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 3 )
              E2(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 4 )
              E3(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 5 )
+           ELSE
+             ! This should not be strictly necessary, since should be ignored
+             ! below
+             K1 = 0.3333333333333_dp
+             K2 = 0.3333333333333_dp
+             E1 = 0.0_dp
+             E2 = 0.0_dp
+             E3 = 0.0_dp
            END IF
 
            LocalVelo = 0.0_dp
@@ -439,17 +447,18 @@ CONTAINS
     ! Copied this one from AIflowSolve_nlS2
 SUBROUTINE GetMaterialDefs()
       ! check if we are isotropic or not
-      Isotropic = ListGetLogical( Material , 'Isotropic',Gotit )
+      Isotropic = ListGetLogical( SolverParams , 'Isotropic',Gotit )
       IF (.NOT.Gotit) Then
           Isotropic = .False.
            WRITE(Message,'(A)') 'Isotropic set to False'
-           CALL INFO('AIFlowSolve', Message, Level = 20)
+           CALL INFO('DeformationalHeatAI', Message, Level = 20)
       ELSE
            IF ( (ASSOCIATED( FabricVariable )).AND.Isotropic ) Then
               WRITE(Message,'(A)') 'Be careful Isotropic is true &
                            & and Fabric is defined!'
-              CALL INFO('AIFlowSolve', Message, Level = 1)
+              CALL INFO('DeformationalHeatAI', Message, Level = 1)
            END IF
+           Isotropic = .True.
       END IF
 
       IF (.NOT.Isotropic) Then
