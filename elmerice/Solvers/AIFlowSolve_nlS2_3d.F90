@@ -22,18 +22,18 @@
 ! *****************************************************************************/
 ! ******************************************************************************
 ! *
-! *  Authors:  Juha Ruokolainen, Fabien Gillet-Chaulet, Olivier Gagliardini
-! *  Email:   Juha Ruokolainen
+! *  Authors: Juha Ruokolainen, Fabien Gillet-Chaulet, Olivier Gagliardini
+! *  Email:   Juha.Ruokolainen@csc.fi
 ! *  Web:     http://elmerice.elmerfem.org
 ! *
-! *  Original Date: 
-! *       Date of modification: April 08 => non linear                      
+! *  Original Date: 08 Jun 1997
+! *       Date of modification: April 08 => non linear
 ! *                             May 09 => N-T (see mail Juha 20 Feb 2006) OG
 ! *                             Dec 15 =>2.5D FlowWidth O. Passalacqua
 ! * 
 ! *****************************************************************************
 !> Module containing a solver for (primarily thermal) anisotropic flow
-   RECURSIVE SUBROUTINE AIFlowSolver_nlD2( Model,Solver,dt,TransientSimulation )
+   RECURSIVE SUBROUTINE AIFlowSolver_nlS2_3d( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
 
     USE DefUtils
@@ -72,9 +72,9 @@
      TYPE(Matrix_t),POINTER :: StiffMatrix
 
      INTEGER :: i, j, k, l, n, t, iter, NDeg, STDOFs, LocalNodes, istat
-     INTEGER :: dim, comp 
+     INTEGER :: dim, comp, nb
 
-     TYPE(ValueList_t),POINTER :: Material, BC, BodyForce
+     TYPE(ValueList_t),POINTER :: Material, BC, BodyForce, SolverParams
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement
 
@@ -121,7 +121,8 @@
 
      INTEGER :: AIFlowType
      LOGICAL :: GotForceBC, GotIt, NewtonLinearization = .FALSE., &
-                NormalTangential=.FALSE., UnFoundFatal=.TRUE.
+                NormalTangential=.FALSE.,UnFoundFatal=.TRUE., &
+                Bubbles=.FALSE.
 
      INTEGER :: body_id,bf_id
      INTEGER :: old_body = -1
@@ -143,7 +144,7 @@
      REAL(KIND=dp) :: Bu, Bv, Bw, RM(3,3)
      REAL(KIND=dp), POINTER :: BoundaryNormals(:,:), &
          BoundaryTangent1(:,:), BoundaryTangent2(:,:)
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile
+     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar
      REAL(KIND=dp) :: Radius
 
 #ifdef USE_ISO_C_BINDINGS
@@ -189,11 +190,18 @@
       LocalNodes = COUNT( AIFlowPerm > 0 )
       IF ( LocalNodes <= 0 ) RETURN
 
-      TempSol => VariableGet( Solver % Mesh % Variables, 'Temperature' )
+      SolverParams => GetSolverParams()
+      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal )
+      IF (.NOT.GotIt) THEN
+          TempVar = 'Temperature'
+      END IF
+      TempSol => VariableGet( Solver % Mesh % Variables, TempVar )
       IF ( ASSOCIATED( TempSol) ) THEN
         TempPerm    => TempSol % Perm
         Temperature => TempSol % Values
       END IF
+      WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
+      CALL INFO('AIFlowSolve', Message , level = 20)
 
       FabricVariable => VariableGet(Solver % Mesh % Variables, 'Fabric')
       IF ( ASSOCIATED( FabricVariable ) ) THEN
@@ -235,6 +243,11 @@
       IF ( .NOT. AllocationsDone .OR. Solver % Mesh % Changed) THEN
         N = Model % MaxElementNodes
         dim = CoordinateSystemDimension()
+        if ( Bubbles ) THEN
+            NB = 2 * n
+        ELSE
+            NB = n
+        END IF
 
        IF ( AllocationsDone ) THEN
          DEALLOCATE( ElementNodes % x,     &
@@ -357,8 +370,9 @@
         END IF
 
         LocalFluidity(1:n) = ListGetReal( Material, &
-                         'Fluidity Parameter', n, NodeIndexes, GotIt,UnFoundFatal=UnFoundFatal)
-           !Previous default value: LocalFluidity(1:n) = 1.0
+                         'Fluidity Parameter', n, NodeIndexes, GotIt,&
+                         UnFoundFatal=UnFoundFatal)
+       !Previous default value: LocalFluidity(1:n) = 1.0
 
 
        LocalFlowWidth(1:n) = ListGetReal ( Material, &
@@ -424,10 +438,10 @@
               LocalForce, LoadVector, K1, K2, E1, E2, E3, LocalVelo, &
               LocalTemperature, LocalFlowWidth, LocalFluidity, CurrentElement, n, &
               ElementNodes, Wn, MinSRInvariant, Isotropic, VariableFlowWidth, &
-              VariableLocalFlowWidth)
+              VariableLocalFlowWidth, Bubbles)
 
         TimeForce = 0.0d0
-         CALL NSCondensate(N, N,STDOFs-1,LocalStiffMatrix,LocalForce,TimeForce )
+        IF ( Bubbles ) CALL NSCondensate(N, N,STDOFs-1,LocalStiffMatrix,LocalForce,TimeForce )
 !------------------------------------------------------------------------------
 !        Update global matrices from local matrices 
 !------------------------------------------------------------------------------
@@ -588,8 +602,8 @@
 
         LocalFluidity(1:n) = ListGetReal( Material, &
                       'Fluidity Parameter', n, NodeIndexes, GotIt,&
-                       UnFoundFatal=UnFoundFatal)
-         !Previous default value: LocalFluidity(1:n) = 1.0
+                      UnFoundFatal=UnFoundFatal)
+        ! Previous default value: LocalFluidity(1:n) = 1.0
 
        LocalFlowWidth(1:n) = ListGetReal ( Material, &
                         'FlowWidth', n, NodeIndexes, GotIt)
@@ -656,7 +670,7 @@
            CALL LocalSD(NodalStresses, NodalStrainRate, NodalSpin, & 
                  LocalVelo, LocalTemperature, LocalFluidity,  &
                 LocalFlowWidth, K1, K2, E1, E2, E3, Basis, dBasisdx, &
-                CurrentElement, n, ElementNodes, dim, Wn, &
+                CurrentElement, n, nb, ElementNodes, dim, Wn, &
                 MinSRInvariant, Isotropic, VariableFlowWidth, &
                 VariableLocalFlowWidth)
                 
@@ -784,7 +798,7 @@ CONTAINS
          !Previous default value: Wn(5) = -10.0 (Celsius)
       WRITE(Message,'(A,F10.4)') 'Reference Temperature = ',   Wn(5)
       CALL INFO('AIFlowSolve', Message, Level = 20)
-      
+
       Wn(6) = ListGetConstReal( Material, 'Limit Temperature', GotIt,UnFoundFatal=UnFoundFatal)
          !Previous default value: Wn(6) = -10.0 (Celsius)
       WRITE(Message,'(A,F10.4)') 'Limit Temperature = ',   Wn(6)
@@ -815,7 +829,7 @@ CONTAINS
               LoadVector, NodalK1, NodalK2, NodalEuler1, NodalEuler2, &
               NodalEuler3, NodalVelo, NodalTemperature, NodalFlowWidth, &
               NodalFluidity, Element, n, Nodes, Wn, MinSRInvariant, Isotropic, &
-              VariableFlowWidth, VariableLocalFlowWidth )
+              VariableFlowWidth, VariableLocalFlowWidth, Bubbles )
                        
 !------------------------------------------------------------------------------
 
@@ -827,7 +841,7 @@ CONTAINS
              NodalFluidity, NodalFlowWidth
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t) :: Element
-     LOGICAL :: Isotropic, VariableFlowWidth, VariableLocalFlowWidth
+     LOGICAL :: Isotropic, VariableFlowWidth, VariableLocalFlowWidth, Bubbles
      INTEGER :: n
 !------------------------------------------------------------------------------
 !
@@ -883,8 +897,13 @@ CONTAINS
 !    
 !    Integration stuff
 !    
+     IF ( Bubbles ) THEN
       NBasis = 2*n
       IntegStuff = GaussPoints( Element, Element % Type % GaussPoints2 )
+     ELSE
+      NBasis = n
+      IntegStuff = GaussPoints( Element )
+     END IF
 
       U_Integ => IntegStuff % u
       V_Integ => IntegStuff % v
@@ -904,7 +923,7 @@ CONTAINS
 !     Basis function values & derivatives at the integration point
 !------------------------------------------------------------------------------
       stat = ElementInfo( Element,Nodes,u,v,w,SqrtElementMetric, &
-            Basis,dBasisdx,ddBasisddx,.FALSE.,.TRUE. )
+            Basis,dBasisdx,ddBasisddx,.FALSE.,Bubbles=Bubbles )
 
       s = SqrtElementMetric * S_Integ(t)
 !------------------------------------------------------------------------------
@@ -983,6 +1002,38 @@ CONTAINS
 
     ! Compute the invariant 
         nn = (1.0 - Wn(2))/(2.0*Wn(2))
+
+     IF (.NOT.ISOTROPIC) then  ! non linear and anisotropic
+        D(1) = SR(1,1)
+        D(2) = SR(2,2)
+        D(3) = SR(3,3)
+        D(4) = 2. * SR(1,2)
+        D(5) = 2. * SR(2,3)
+        D(6) = 2. * SR(3,1)
+      
+        INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
+        INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
+        Stress = 0.
+        DO k = 1, 2*dim
+         DO j = 1, 2*dim
+          Stress( INDi(k),INDj(k) ) = &
+          Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
+         END DO
+         IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
+        END DO 
+        ss = 0.0_dp
+        pp=0._dp
+        DO i = 1, 3
+          DO j = 1, 3
+            ss = ss + Stress(i,j)**2.
+            pp=pp+SR(i,j)**2.
+          END DO
+        END DO
+        ss=ss/4.       ! pour avoir le meme resultat si Isotropic
+        !if (Radius.lt.2000) write(*,*) ss,pp,Radius
+        IF (ss < MinSRInvariant ) ss = MinSRInvariant
+        ss = (2.*ss)**nn
+     Else
         ss = 0.0_dp
         DO i = 1, 3
           DO j = 1, 3
@@ -991,6 +1042,8 @@ CONTAINS
         END DO
         IF (ss < MinSRInvariant ) ss = MinSRInvariant
         ss = (2.*ss)**nn
+     END IF
+
       END IF
 
 ! Non relative viscosity matrix
@@ -1250,18 +1303,18 @@ CONTAINS
       SUBROUTINE LocalSD( Stress, StrainRate, Spin, &
         NodalVelo, NodalTemp, NodalFluidity, NodalFlowWidth, &
         NodalK1, NodalK2, NodalE1, NodalE2, NodalE3, &
-        Basis, dBasisdx, Element, n,  Nodes, dim,  Wn, MinSRInvariant, &
+        Basis, dBasisdx, Element, n, nbasis,Nodes, dim,  Wn, MinSRInvariant, &
         Isotropic, VariableFlowWidth, VariableLocalFlowWidth )
 !------------------------------------------------------------------------------
 !    Subroutine to compute the nodal Strain-Rate, Stress, ...
 !------------------------------------------------------------------------------
-     INTEGER :: n, dim
+     INTEGER :: n, dim,nbasis
      INTEGER :: INDi(6),INDj(6)
      REAL(KIND=dp) :: Stress(:,:), StrainRate(:,:), Spin(:,:)
      REAL(KIND=dp) :: NodalVelo(:,:), NodalTemp(:), NodalFluidity(:), &
                       NodalFlowWidth(:)
-     REAL(KIND=dp) :: Basis(2*n), ddBasisddx(1,1,1)
-     REAL(KIND=dp) :: dBasisdx(2*n,3)
+     REAL(KIND=dp) :: Basis(nbasis), ddBasisddx(1,1,1)
+     REAL(KIND=dp) :: dBasisdx(nbasis,3)
      REAL(KIND=dp) :: detJ
      REAL(KIND=dp) :: NodalK1(:), NodalK2(:)
      REAL(KIND=dp) :: NodalE1(:), NodalE2(:), NodalE3(:)
@@ -1401,11 +1454,11 @@ CONTAINS
         ss = 0.0_dp
         DO i = 1, 3
           DO j = 1, 3
-            ss = ss + StrainRate(i,j)**2
+            ss = ss + Stress(i,j)**2
           END DO
         END DO
         nn = (1.0 - Wn(2))/(2.0*Wn(2))
-        ss = (2.*ss)**nn
+        ss = (ss / 2.0)**nn
          
         IF (ss < MinSRInvariant ) ss = MinSRInvariant
         
@@ -1421,5 +1474,5 @@ CONTAINS
 !------------------------------------------------------------------------------
 !        
 !------------------------------------------------------------------------------
-      END SUBROUTINE AIFlowSolver_nlD2
+      END SUBROUTINE AIFlowSolver_nlS2_3d
 !------------------------------------------------------------------------------

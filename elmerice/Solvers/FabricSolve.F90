@@ -71,9 +71,9 @@
 
      TYPE(Matrix_t),POINTER :: StiffMatrix
 
-     INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat
+     INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat,spoofdim
 
-     TYPE(ValueList_t),POINTER :: Material, BC
+     TYPE(ValueList_t),POINTER :: Material, BC, SolverParams
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement, Element, &
               ParentElement, LeftParent, RightParent, Edge
@@ -85,14 +85,18 @@
      INTEGER :: NewtonIter,NonlinearIter
 
      TYPE(Variable_t), POINTER :: FabricSol, TempSol, FabricVariable, FlowVariable, &
-                                  EigenFabricVariable, MeshVeloVariable
+                                  EigenFabricVariable,MeshVeloVariable,&
+                                  OOPlaneRotSol13, OOPlaneRotSol23
 
      REAL(KIND=dp), POINTER :: Temperature(:),Fabric(:), &
            FabricValues(:), FlowValues(:), EigenFabricValues(:), &
-           MeshVeloValues(:), Solution(:), Ref(:)
+           MeshVeloValues(:), Solution(:), Ref(:), &
+           OOPlaneRotValues13(:), OOPlaneRotValues23(:)
+
 
      INTEGER, POINTER :: TempPerm(:),FabricPerm(:),NodeIndexes(:), &
-                        FlowPerm(:), MeshVeloPerm(:), EigenFabricPerm(:)
+                        FlowPerm(:),MeshVeloPerm(:),EigenFabricPerm(:),&
+                        OOPlaneRotPerm13(:), OOPlaneRotPerm23(:)
 
      REAL(KIND=dp) :: rho,lambda   !Interaction parameter,diffusion parameter
      REAL(KIND=dp) :: A1plusA2
@@ -101,6 +105,8 @@
      REAL(KIND=dp) :: ai(3), Angle(3)
 
      LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
+     LOGICAL :: OOPlaneRot13
+     LOGICAL :: OOPlaneRot23
 
      INTEGER :: body_id,bf_id,eq_id, comp, Indexes(128)
 !
@@ -115,14 +121,16 @@
      REAL(KIND=dp), ALLOCATABLE:: MASS(:,:), STIFF(:,:),  &
        LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
        Alpha(:,:),Beta(:), K1(:), K2(:), E1(:), E2(:), E3(:), &
-       Velocity(:,:), MeshVelocity(:,:)
+       Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:)
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, K1, K2, &
           E1, E2, E3, Wn,  FabricGrid, rho, lambda, Velocity, &
-          MeshVelocity, old_body, dim, comp
+          MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
+          spoofdim
 !------------------------------------------------------------------------------
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile
+     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
+     OOPlaneRotVar13, OOPLaneRotVar23
 
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
@@ -135,10 +143,10 @@
 #endif
 !------------------------------------------------------------------------------
       INTERFACE
-        Subroutine R2Ro(a2,dim,ai,angle)
+        Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
         USE Types
         REAL(KIND=dp),intent(in) :: a2(6)
-        Integer :: dim
+        Integer :: dim, spoofdim
         REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
        End Subroutine R2Ro
       End Interface                                                       
@@ -162,12 +170,47 @@
       FabricPerm   => FabricSol % Perm
       FabricValues => FabricSol % Values
 
-      TempSol => VariableGet( Solver % Mesh % Variables, 'Temperature' )
-      IF ( ASSOCIATED( TempSol) ) THEN
-       TempPerm    => TempSol % Perm
-       Temperature => TempSol % Values
+      SolverParams => GetSolverParams()
+      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal=.FALSE. )
+      IF (.NOT.GotIt) THEN
+          TempVar = 'Temperature'
       END IF
+      TempSol => VariableGet( Solver % Mesh % Variables, TempVar )
+      IF ( ASSOCIATED( TempSol) ) THEN
+        TempPerm    => TempSol % Perm
+        Temperature => TempSol % Values
+      END IF
+      WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
+      CALL INFO('FabricSolve', Message , level = 20)
+      OOPlaneRotVar23 = ListGetString( SolverParams,'OOPlane23 Strain Name',GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+          OOPlaneRot23 = .FALSE.
+          OOPlaneRotVar23 = 'Dummy'
+      ELSE
+          OOPlaneRot23 = .TRUE.
+          OOPlaneRotSol23 => VariableGet( Solver % Mesh % Variables, OOPLaneRotVar23 )
+          IF ( ASSOCIATED( OOPlaneRotSol23) ) THEN
+            OOPlaneRotPerm23 => OOPlaneRotSol23 % Perm
+            OOPlaneRotValues23 => OOPlaneRotSol23 % Values
+          END IF
+      END IF
+      WRITE(Message,'(A,A)') 'OOPlane23 variable = ', OOPlaneRotVar23
+      CALL INFO('FabricSolve', Message , level = 20)
 
+      OOPlaneRotVar13 = ListGetString( SolverParams,'OOPlane13 Strain Name',GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+          OOPlaneRot13 = .FALSE.
+          OOPlaneRotVar13 = 'Dummy'
+      ELSE
+          OOPlaneRot13 = .TRUE.
+          OOPlaneRotSol13 => VariableGet( Solver % Mesh % Variables, OOPLaneRotVar13 )
+          IF ( ASSOCIATED( OOPlaneRotSol13) ) THEN
+            OOPlaneRotPerm13 => OOPlaneRotSol13 % Perm
+            OOPlaneRotValues13 => OOPlaneRotSol13 % Values
+          END IF
+      END IF
+      WRITE(Message,'(A,A)') 'OOPlane13 variable = ', OOPlaneRotVar13
+      CALL INFO('FabricSolve', Message , level = 20)
       FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
       IF ( ASSOCIATED( FlowVariable ) ) THEN
        FlowPerm    => FlowVariable % Perm
@@ -196,6 +239,11 @@
         N = Model % MaxElementNodes
 
        dim = CoordinateSystemDimension()
+       IF ( OOPlaneRot13 .OR. OOPlaneRot23 ) THEN
+           spoofdim = dim + 1
+       ELSE
+           spoofdim = dim
+       END IF
        
        IF ( AllocationsDone ) THEN
          DEALLOCATE( LocalTemperature, &
@@ -204,7 +252,8 @@
                      Velocity,MeshVelocity, &
                      MASS,STIFF,      &
                      LOAD, Alpha, Beta, &
-                     CurrFabric, TempFabVal )
+                     CurrFabric, TempFabVal, &
+                     LocalOOP13, LocalOOP23 )
        END IF
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
@@ -216,6 +265,7 @@
                  LOAD( 4,N ), Alpha( 3,N ), Beta( N ), &
                  CurrFabric( 5*SIZE(Solver % Variable % Values)), &
                  TempFabVal( SIZE(FabricValues)), &
+                 LocalOOP13(N), LocalOOP23(N), &
                  STAT=istat )
 
 
@@ -302,7 +352,7 @@
 
        PrevUNorm = UNorm
        
-       DO COMP=1,2*dim-1
+       DO COMP=1,2*spoofdim-1
 
        Solver % Variable % Values = CurrFabric( COMP::5 )
        IF ( TransientSimulation ) THEN
@@ -365,7 +415,7 @@
 
          k = FlowVariable % DOFs
          Velocity = 0.0d0
-         DO i=1,k
+         DO i=1,k-1
             Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
          END DO
 
@@ -379,9 +429,27 @@
          EndIF
 !----------------------------------
 
-         CALL LocalMatrix( COMP, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-           E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
-           MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda )
+          If ( OOPlaneRot23 .AND. OOPlaneRot13 ) THEN
+             LocalOOP13 = 0.0_dp
+             LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
+             LocalOOP23 = 0.0_dp
+             LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
+             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
+               E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
+               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
+               LocalOOP23, LocalOOP13)
+         Else If ( OOPlaneRot23 ) THEN
+             LocalOOP23 = 0.0_dp
+             LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
+             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
+               E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
+               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
+               LocalOOP23)
+         ELSE
+             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
+               E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
+               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda )
+         END IF
 
 !------------------------------------------------------------------------------
 !        Update global matrices from local matrices 
@@ -624,7 +692,7 @@
          RelativeChange = 2.0d0 * ABS( PrevUNorm - UNorm) / ( PrevUnorm + UNorm)
       ELSE
          RelativeChange = 0.0d0
-      END IF
+     END IF
 
       WRITE( Message, * ) 'Result Norm   : ',UNorm
       CALL Info( 'FabricSolve', Message, Level=4 )
@@ -665,7 +733,7 @@
             a2(5)=E2(i)
             a2(6)=E3(i)
 
-            call R2Ro(a2,dim,ai,angle)
+            call R2Ro(a2,dim,spoofdim,ai,angle)
 
             angle(:)=angle(:)*rad2deg
             If (angle(1).gt.90._dp) angle(1)=angle(1)-180._dp
@@ -745,13 +813,14 @@ CONTAINS
       SUBROUTINE LocalMatrix( Comp, MASS, STIFF, FORCE, LOAD, &
           NodalK1, NodalK2, NodalEuler1, NodalEuler2, NodalEuler3, & 
           NodalTemperature, NodalFluidity, NodalVelo, NodMeshVel, &
-          Element, n, Nodes, Wn, rho,lambda )
+          Element, n, Nodes, Wn, rho,lambda,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
 
      REAL(KIND=dp) :: STIFF(:,:),MASS(:,:)
      REAL(KIND=dp) :: LOAD(:,:), NodalVelo(:,:),NodMeshVel(:,:)
      REAL(KIND=dp), DIMENSION(:) :: FORCE, NodalK1, NodalK2, NodalEuler1, &
                NodalEuler2, NodalEuler3, NodalTemperature, NodalFluidity
+     REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
 
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t) :: Element
@@ -762,12 +831,13 @@ CONTAINS
      REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
 
      REAL(KIND=dp) :: A1, A2, A3, E1, E2, E3, Theta
+     REAL(KIND=dp) :: OOP23
 
      REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
      REAL(KIND=dp) :: rho,lambda,Deq, ai(6),a4(9),hmax
 
-     INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3), DOFs = 1
+     INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
      REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), C44,C55,C66
      REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
@@ -798,10 +868,10 @@ CONTAINS
            REAL(KIND=dp),intent(out) :: a4(9)
         END SUBROUTINE
 
-        Subroutine R2Ro(ai,dim,a2,angle)
+        Subroutine R2Ro(ai,dim,spoofdim,a2,angle)
          USE Types
          REAL(KIND=dp),intent(in) :: ai(6)
-         Integer :: dim
+         Integer :: dim, spoofdim
          REAL(KIND=dp),intent(out) :: a2(3), Angle(3)
         End Subroutine R2Ro
 
@@ -820,6 +890,13 @@ CONTAINS
       hmax = maxval (Nodes % y(1:n))
         
      dim = CoordinateSystemDimension()
+
+      ! Check if we are bumping up the problem dimension
+      IF (( PRESENT(LocalOOP13) ).OR.( PRESENT(LocalOOP23))) THEN
+          SpoofDim = dim + 1
+      ELSE
+          SpoofDim = dim
+      END IF
 
       FORCE = 0.0D0
       MASS  = 0.0D0
@@ -902,7 +979,7 @@ CONTAINS
       
 !     A2 expressed in the orthotropic frame
 !
-      call R2Ro(ai,dim,ap,angle)
+      call R2Ro(ai,dim,spoofdim,ap,angle)
 
 !     Get viscosity
 
@@ -942,7 +1019,19 @@ CONTAINS
         END DO
 
       END IF
-      
+
+
+      ! If we are adding in manual spins, do it here before the stress
+      ! calculations
+      IF ( PRESENT(LocalOOP23) ) THEN
+          StrainRate(2, 3) = SUM( LocalOOP23(1:n) * Basis(1:n) )
+          StrainRate(3, 2) = StrainRate(2, 3)
+      END IF
+      IF ( PRESENT(LocalOOP13) ) THEN
+          StrainRate(3, 1) = SUM( LocalOOP13(1:n) * Basis(1:n) )
+          StrainRate(1, 3) = StrainRate(3, 1)
+      END IF
+
 !
 !    Compute deviatoric stresses: 
 !    ----------------------------
@@ -955,8 +1044,8 @@ CONTAINS
       
       INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
       INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
-      DO k = 1, 2*dim
-       DO j = 1, 2*dim
+      DO k = 1, 2*spoofdim
+       DO j = 1, 2*spoofdim
         Stress( INDi(k),INDj(k) ) = &
         Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
        END DO
@@ -967,21 +1056,22 @@ CONTAINS
 !     SD=(1-r)D + r psi/2 S :
 !     -----------------------
       SD=0._dp
-      DO i=1,2*dim
+      DO i=1,2*spoofdim
         SD(i)= (1._dp - rho)*StrainRate(INDi(i),INDj(i)) + rho *&
                                    Theta *  Stress(INDi(i),INDj(i))
       END DO
-      Do i=1,2*dim-3
+      DO i=1,2*spoofdim-3
         Spin(i)=Spin1(INDi(i+3),INDj(i+3))
       End do
 
       Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
-                            (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
+                             (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
+      Deq=Deq * EXP(LOG(10.0_dp) * sum(NodalTemperature(1:n) * Basis(1:n)) / 10.0_dp)
 !
 !     Velocity :
 !     ----------
       Velo = 0.0d0
-      DO i=1,dim
+      DO i=1,spoofdim
          Velo(i) = SUM( Basis(1:n) * (NodalVelo(i,1:n) - NodMeshVel(i,1:n)) )
       END DO
       Unorm = SQRT( SUM( Velo**2._dp ) )
@@ -1026,7 +1116,7 @@ CONTAINS
             !
             ! Advection terms:
             ! ----------------
-            DO j=1,dim
+            DO j=1,spoofdim
                A = A - Velo(j) * Basis(q) * dBasisdx(p,j)
             END DO
 
@@ -1048,7 +1138,7 @@ CONTAINS
           SD(1)*a4(1) + SD(2)*a4(3) - SD(3)*(-A1+a4(1)+a4(3)) ) + & 
                       lambda*Deq
 
-          IF(dim == 3) THEN
+          IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( -Spin(3)*E3 + &
             SD(6)*(2._dp*a4(6)-E3) + 2._dp*SD(5)*a4(4) )
           END IF
@@ -1059,7 +1149,7 @@ CONTAINS
           SD(2)*a4(2) + SD(1)*a4(3) - SD(3)*(-A2+a4(2)+a4(3)) )  +  &
                         lambda*Deq
           
-          IF(dim == 3) THEN
+          IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( Spin(2)*E2 + &
             SD(5)*(2._dp*a4(8)-E2) + 2._dp*SD(6)*a4(5) )
           END IF
@@ -1069,7 +1159,7 @@ CONTAINS
           LoadAtIp = Spin(1)*(A2-A1)  +  SD(4)*(4._dp*a4(3)-A1-A2) + &
           2._dp* ( SD(1)*a4(7) + SD(2)*a4(9) - SD(3)*(-E1+a4(7)+a4(9)) )
           
-          IF(dim == 3) THEN
+          IF(spoofdim == 3) THEN
            LoadAtIp =  LoadAtIp - Spin(3)*E2 + Spin(2)*E3  &
            + SD(6)*(4._dp*a4(4)-E2) + SD(5)*(4._dp*a4(5)-E3)  
           END IF
