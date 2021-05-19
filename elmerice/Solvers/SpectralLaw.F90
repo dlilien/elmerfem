@@ -129,10 +129,11 @@
         DCDt = 0.0
         IF (FIRSTTIME) THEN
             FIRSTTIME = .FALSE.
-            CALL initspecfab()
+            CALL initspecfab(SpectralOrder)
         END IF
 
-        DCDt = dndt_ij(StrainRate, Spin)
+        ! TODO This line breaks with SpecFab updates
+        ! DCDt = dndt_ij_ROT(StrainRate, Spin)
       END SUBROUTINE SpectralModel
 
 

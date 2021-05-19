@@ -1,0 +1,194 @@
+Header
+  Mesh DB "." "square"
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Simulation
+  Coordinate System  = Cartesian 2D
+  Simulation Type = Transient
+
+  Timestepping Method = "bdf"
+  BDF Order = 1
+  Output Intervals = 10
+  Timestep Intervals = 100
+  Timestep Sizes = 0.05
+
+  Steady State Min Iterations = 1
+  Steady State Max Iterations = 1
+
+  !Output File = "test.result"
+  Post File = "test.vtu"
+  max output level = 4
+
+  Initialize Dirichlet Conditions = Logical False
+End
+
+Constants
+   Gas Constant = Real 8.314
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Body Force
+Body Force 1
+  AIFlow Force 2 = Real -0.00899  ! body force, i.e. gravity * density
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Material
+Material 1
+!!!!! For AIFlows...
+  Powerlaw Exponent = Real 1.0         !
+  Reference Temperature = Real -10.0   ! T0 (Celsius)!
+  Fluidity Parameter = Real 20.        ! Bn(T0)
+  Limit Temperature = Real -5.0        ! TL  (Celsius)!
+  Activation Energy 1 = Real 7.8e04    ! Joule/mol for T<TL
+  Activation Energy 2 = Real 7.8e04    ! Joule/mol for T>TL
+
+  Viscosity File = FILE "040010010.Va"
+
+  Isotropic = Logical False !If set to true Glen flow law (no need to defined Fabric)
+
+!!!! For Fabric Solver
+  Interaction Parameter = Real 0. ! 0=> Fabric Evolution function of Strain-rates 1=> Fabric Evolution function of dev stresses
+                                  !If not defined set to the default value given in Viscosity File
+  Diffusion Parameter = Real 0.   ! Diffusion term. By default set to 0 if not defined
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Initial Condition
+Initial Condition 1
+  FabricR 1 = Real 0.33333333333333 !a2_11
+  FabricR 2 = Real 0.33333333333333 !a2_22
+  FabricR 3 = Real 0.               !a2_12
+  FabricR 4 = Real 0.               !a2_23
+  FabricR 5 = Real 0.               !a2_13
+
+
+  Fabric 1 = Real 0.33333333333333 !a2_11
+  Fabric 2 = Real 0.33333333333333 !a2_22
+  Fabric 3 = Real 0.               !a2_12
+  Fabric 4 = Real 0.               !a2_23
+  Fabric 5 = Real 0.               !a2_13
+
+  AIFlow 1 = Real 0.0              ! u_1
+  AIFlow 2 = Real -2.0e-1              ! u_2
+  AIFlow 3 = Real 0.0              ! p for 2D u_3 for 3D
+
+  Temperature = Real -10.0
+End
+
+
+!%%%%%%%%%%%%%%%%%%%%%      Solvers
+Solver 1
+  Equation = AIFlow
+  Variable = AIFlow
+  Variable DOFs = 3                        !3 for 2D -- 4 for 3D
+
+  Exported Variable 1 = Temperature        !Define Temperature Mandatory!!
+  Exported Variable 1 DOFS = Integer 1
+
+  Exported Variable 2 = FabricR            !Define Fabric Variable !!Mandatory if Isotropic=False
+  Exported Variable 2 DOFS = Integer 5
+
+  Exported Variable 3 =  StrainRate        ! Compute SR
+  Exported Variable 3 DOFS = Integer 4     !4 in 2D  6 in 3D (11,22,33,12,23,31)
+
+  Exported Variable 4 =  DeviatoricStress  ! Compute Stresses
+  Exported Variable 4 DOFS = Integer 4     !4 in 2D  6 in 3D  (11,22,33,12,23,31)
+
+  Exported Variable 5 =  Spin              ! Compute Spin
+  Exported Variable 5 DOFS = Integer 1     !1 in 2D  3 in 3D (12,23,31)
+
+  Exported Variable 6 = Fabric            !Define Fabric Variable !!Mandatory if Isotropic=False
+  Exported Variable 6 DOFS = Integer 5
+
+  Procedure = "ElmerIceSolvers" "AIFlowSolver_nlS2"
+
+  Linear System Solver = Direct
+  Linear System Direct Method = umfpack
+
+! linear flow law (exponent=1) => no need for non lin iters.
+  Nonlinear System Max Iterations = 1
+  Nonlinear System Convergence Tolerance  = 1.0e-5
+  Nonlinear System Newton After Iterations = 5
+  Nonlinear System Newton After Tolerance = 1.0e-05
+  Nonlinear System Relaxation Factor = 1.00
+
+  Steady State Convergence Tolerance = Real 1.0e-4
+
+  Exec Solver = Never
+
+End
+
+!!!!!Fabric Solver
+Solver 2
+  Equation = FabricRecryst
+  Variable = -nooutput CompfabR    ! dumy variable
+  Variable DOFs = 1               !FabricSolver compute each variable independently, Picard Type iterations
+
+  Procedure = "ElmerIceSolvers" "FabricSolverRecryst"
+  Discontinuous Galerkin = Logical True
+
+  Fabric Name = String FabricR
+
+
+  Linear System Solver = Direct
+  Linear System Direct Method = umfpack
+
+  Nonlinear System Max Iterations = 10
+  Nonlinear System Convergence Tolerance  = 1.0e-5
+  Nonlinear System Relaxation Factor = 1.00
+
+End
+
+Solver 3
+  Equation = Fabric
+  Variable = -nooutput Compfab    ! dumy variable
+  Variable DOFs = 1               !FabricSolver compute each variable independently, Picard Type iterations
+
+  Procedure = "ElmerIceSolvers" "FabricSolver"
+  Discontinuous Galerkin = Logical True
+
+
+  Linear System Solver = Direct
+  Linear System Direct Method = umfpack
+
+  Nonlinear System Max Iterations = 10
+  Nonlinear System Convergence Tolerance  = 1.0e-5
+  Nonlinear System Relaxation Factor = 1.00
+
+End
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Equation 1
+  Active Solvers(3)= 1 2 3
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Boundary Condition
+Boundary Condition 1
+  Target Boundaries = 3
+  name= String 'top'
+  AIFlow 2 = Real -2.0e-1
+
+
+  Fabric 1 = Real 1.0 !a2_11
+  Fabric 2 = Real 0.0 !a2_22
+  Fabric 3 = Real 0.               !a2_12
+  Fabric 4 = Real 0.               !a2_23
+  Fabric 5 = Real 0.               !a2_13
+
+  FabricR 1 = Real 1.0 !a2_11
+  FabricR 2 = Real 0.0 !a2_22
+  FabricR 3 = Real 0.               !a2_12
+  FabricR 4 = Real 0.               !a2_23
+  FabricR 5 = Real 0.               !a2_13
+End
+
+Boundary Condition 2
+  Target Boundaries = 1
+  name= String 'bottom'
+  AIFlow 2 = Real -2.0e-1
+End
+
+Boundary Condition 3
+  Target Boundaries = 4
+  AIFlow 1 = Real 0.0e0
+End

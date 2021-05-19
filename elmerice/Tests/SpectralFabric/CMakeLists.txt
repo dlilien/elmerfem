@@ -1,11 +1,13 @@
-INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../test_macros.cmake)
+IF (HAVE_SpecFab)
+    INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../test_macros.cmake)
 
-CONFIGURE_FILE(SpectralFabric.sif SpectralFabric.sif COPYONLY)
+    CONFIGURE_FILE(SpectralFabric.sif SpectralFabric.sif COPYONLY)
 
-SET(FILE_LISTS ${CMAKE_SOURCE_DIR}/elmerice/Solvers/SpectralFabricSolve.F90)
-ADD_ELMERICETEST_MODULE(SpectralFabric  SpectralFabricSolve "${FILE_LISTS}")
+    SET(FILE_LISTS ${CMAKE_SOURCE_DIR}/elmerice/Solvers/SpectralFabricSolve.F90)
+    ADD_ELMERICETEST_MODULE(SpectralFabric  SpectralFabricSolve "${FILE_LISTS}")
 
-FILE(COPY ELMERSOLVER_STARTINFO square.grd DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/")
+    FILE(COPY ELMERSOLVER_STARTINFO square.grd DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/")
 
-ADD_ELMERICE_TEST(SpectralFabric)
-ADD_ELMERICE_LABEL(SpectralFabric elmerice-fast)
+    ADD_ELMERICE_TEST(SpectralFabric)
+    ADD_ELMERICE_LABEL(SpectralFabric elmerice-fast)
+ENDIF()

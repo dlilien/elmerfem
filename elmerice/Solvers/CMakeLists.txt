@@ -49,6 +49,20 @@ ELSE()
   MESSAGE(WARNING "  \n Missing: >HDF5_INCLUDE_DIR< , >HDF5_LIBRARY<,  >HDF5F_LIBRARY< \n some functionalities will be disabled")
 ENDIF(PHDF5_FOUND)
 
+FIND_PACKAGE(SpecFab)
+IF(SpecFab_FOUND)
+    SET(HAVE_SpecFab TRUE)
+  MARK_AS_ADVANCED(HAVE_SpecFab)
+  ADD_DEFINITIONS(-DHAVE_SpecFab)
+  INCLUDE_DIRECTORIES(${SpecFab_INCLUDE})
+  MESSAGE(STATUS "  SpecFab:           " "${SpecFab_FOUND}")
+  MESSAGE(STATUS "  SpecFab_LIBS:     " "${SpecFab_LIBRARIES}")
+  MESSAGE(STATUS "  SpecFab_INCLUDE:     " "${SpecFab_INCLUDE}")
+ELSE()
+  MESSAGE(STATUS "Library not found: >SpecFab_FOUND< ")
+  MESSAGE(WARNING "  \n Missing: >SpecFab_LIBRARY< \n some functionalities will be disabled")
+ENDIF(SpecFab_FOUND)
+
 
 # ---------------------- #
 # -- LOOK FOR MMG     -- #
@@ -89,7 +103,13 @@ SET(ElmerIce_SRC ElmerIceUtils.F90 AIFlowSolve_nlD2.F90 AIFlowSolve_nlS2.F90  AI
     CalvingFrontAdvance3D.F90 Emergence.F90 SSAmask.F90 
     GlaDSCoupledSolver.F90 GlaDSchannelSolver.F90 Flotation.F90
     BasalMelt3D.F90 CalvingHydroInterp.F90 HydroRestart.F90 
-    GMValid.F90 SpectralFabricSolve.F90 SpectralLaw.F90)
+    GMValid.F90)
+
+IF(HAVE_SpecFab)
+    MESSAGE(STATUS "Adding Specs")
+    SET(ElmerIce_SRC ${ElmerIce_SRC} SpectralFabricSolve.F90 SpectralLaw.F90 FabricSolveRecryst.F90)
+ENDIF()
+
 IF(HAVE_ODEPack)
   SET(ElmerIce_SRC ${ElmerIce_SRC} PlumeSolver.F90 )
 ENDIF()
@@ -127,10 +147,13 @@ ENDIF()
 TARGET_LINK_LIBRARIES(ElmerIceSolvers elmersolver)
 
 IF(HAVE_NETCDF)
-TARGET_LINK_LIBRARIES(ElmerIceSolvers ${NetCDF_LIBRARIES})
+    TARGET_LINK_LIBRARIES(ElmerIceSolvers ${NetCDF_LIBRARIES})
+ENDIF()
+IF(HAVE_SpecFab)
+    TARGET_LINK_LIBRARIES(ElmerIceSolvers ${SpecFab_LIBRARIES})
 ENDIF()
 IF(HAVE_HDF5)
-TARGET_LINK_LIBRARIES(ElmerIceSolvers ${PHDF5_LIBRARIES})
+    TARGET_LINK_LIBRARIES(ElmerIceSolvers ${PHDF5_LIBRARIES})
 ENDIF()
 # IF(HAVE_MMG)
 #   TARGET_LINK_LIBRARIES(ElmerIceSolvers ${MMG_LIBRARY})
