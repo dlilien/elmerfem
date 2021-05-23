@@ -23,20 +23,21 @@
 ! ******************************************************************************
 ! *
 ! *  Authors:  Juha Ruokolainen, Olivier Gagliardini, Fabien Gillet-Chaulet
+! *             Recrystallization added by David Lilien
 ! *  Email:   Juha.Ruokolainen@csc.fi
 ! *  Web:     http://elmerice.elmerfem.org
 ! *  Address: CSC - IT Center for Science Ltd.
 ! *           Keilaranta 14
 ! *           02101 Espoo, Finland 
 ! *
-! *       Date of modification: 03/05
+! *       Date of modification: 06/21
 ! *
 ! *****************************************************************************/
 !>  Solver for fabric parameter equations 
 !------------------------------------------------------------------------------
       RECURSIVE SUBROUTINE FabricSolverRecryst( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
-
+      USE SpecFab
       USE DefUtils
 
       IMPLICIT NONE
@@ -114,7 +115,7 @@
 
      REAL(KIND=dp) :: FabricGrid(4879)                   
                         
-     LOGICAL :: AllocationsDone = .FALSE., FreeSurface
+     LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE., FreeSurface
 
      TYPE(Variable_t), POINTER :: TimeVar
 
@@ -127,13 +128,15 @@
           LocalTemperature, LocalFluidity,  AllocationsDone, K1, K2, &
           E1, E2, E3, Wn,  FabricGrid, rho, lambda, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
-          spoofdim, FabVarName
+          spoofdim, FabVarName, FirstTime
 !------------------------------------------------------------------------------
      CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
      OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
 
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
+
+     INTEGER, PARAMETER :: LCap=4
 
      SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal
 #ifdef USE_ISO_C_BINDINGS
@@ -153,7 +156,11 @@
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
-         
+      IF (FIRSTTIME) THEN
+        CALL initspecfab(Lcap)
+        FIRSTTIME = .FALSE.
+      END IF
+
       Wn(7) = ListGetConstReal( Model % Constants, 'Gas Constant', GotIt,UnFoundFatal=UnFoundFatal )
       !Previous default value: Wn(7) = 8.314
       WRITE(Message,'(A,F10.4)')'Gas Constant =',Wn(7)
@@ -179,11 +186,13 @@
         FabricPerm   => FabricSol % Perm
         FabricValues => FabricSol % Values
       ELSE
-        WRITE(Message,'(A,A,A)') 'Fabric variable ', FabVarName, ' not found, quitting'
+        WRITE(Message,'(A,A,A)') 'Fabric variable ', FabVarName, &
+            ' not found, quitting'
         CALL FATAL('FabricSolveRecryst', Message)
       END IF
 
-      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal=.FALSE. )
+      TempVar = ListGetString( SolverParams,'Temperature Solution Name',&
+            GotIt,UnFoundFatal=.FALSE. )
       IF (.NOT.GotIt) THEN
           TempVar = 'Temperature'
       END IF
@@ -194,7 +203,8 @@
       END IF
       WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
       CALL INFO('FabricSolveRecryst', Message , level = 20)
-      OOPlaneRotVar23 = ListGetString( SolverParams,'OOPlane23 Strain Name',GotIt,UnFoundFatal=.FALSE.)
+      OOPlaneRotVar23 = ListGetString( SolverParams, &
+        'OOPlane23 Strain Name',GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
           OOPlaneRot23 = .FALSE.
           OOPlaneRotVar23 = 'Dummy'
@@ -209,7 +219,8 @@
       WRITE(Message,'(A,A)') 'OOPlane23 variable = ', OOPlaneRotVar23
       CALL INFO('FabricSolveRecryst', Message , level = 20)
 
-      OOPlaneRotVar13 = ListGetString( SolverParams,'OOPlane13 Strain Name',GotIt,UnFoundFatal=.FALSE.)
+      OOPlaneRotVar13 = ListGetString( SolverParams,&
+        'OOPlane13 Strain Name',GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
           OOPlaneRot13 = .FALSE.
           OOPlaneRotVar13 = 'Dummy'
@@ -818,21 +829,23 @@ CONTAINS
       CALL INFO('AIFlowSolve', Message, Level = 20)
 
 
-      Wn(8) = ListGetConstReal( Material, 'Migration Beta', GotIt,UnFoundFatal=.FALSE.)
+      Wn(8) = ListGetConstReal( Material, 'Migration Gamma', GotIt,UnFoundFatal=.FALSE.)
            !Previous default value: Wn(6) = -10.0
       IF (.NOT.GotIt) THEN
         Wn(8) = 0.0_dp
-        WRITE(Message,'(A,F10.4)') 'Migration Beta unfound, taken to be ',   Wn(8)
+        WRITE(Message,'(A,F10.4)') &
+            'Migration Gamma unfound, taken to be ',   Wn(8)
         CALL INFO('AIFlowSolve', Message, Level = 3)
       ELSE
-        WRITE(Message,'(A,F10.4)') 'Migration Beta = ',   Wn(8)
+        WRITE(Message,'(A,F10.4)') 'Migration Gamma = ',   Wn(8)
         CALL INFO('AIFlowSolve', Message, Level = 20)
       END IF
 
       Wn(9) = ListGetConstReal( Material, 'Lattice Rotation', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(9) = 1.0_dp
-        WRITE(Message,'(A,F10.4)') 'Lattice Rotation unfound, assumed active'
+        WRITE(Message,'(A,F10.4)') &
+            'Lattice Rotation unfound, assumed active'
         CALL INFO('AIFlowSolve', Message, Level = 3)
       ELSE
         WRITE(Message,'(A,F10.4)') 'Lattice Rotation = ',   Wn(9)
@@ -870,7 +883,7 @@ CONTAINS
 
      REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
-     REAL(KIND=dp) :: rho,lambda,Deq, ai(6),a4(9),hmax
+     REAL(KIND=dp) :: rho,lambda,Deq,ai(6),a4(9),hmax,a2short(5),da2dt_mig(5)
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
@@ -882,6 +895,7 @@ CONTAINS
      REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS
      Integer :: INDi(6),INDj(6)
      LOGICAL :: CSymmetry
+     INTEGER, PARAMETER :: LCap=4
      
      LOGICAL :: Fond
               
@@ -919,6 +933,11 @@ CONTAINS
           REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
         END SUBROUTINE OPILGGE_ai_nl
         
+        !FUNCTION  da2dt_DRX_elmer(tau, a2, a4)
+        !  real(kind=8), intent(in) :: tau(3,3), a2(5), a4(9)
+        !  real(kind=8) :: da2dt_DRX_mat(3,3)
+        !  real(kind=8) :: da2dt_DRX_elmer(5)
+        !END FUNCTION da2dt_DRX_elmer
       END INTERFACE
 !------------------------------------------------------------------------------
       Fond=.False.
@@ -1009,6 +1028,13 @@ CONTAINS
       ai(4)=E1
       ai(5)=E2
       ai(6)=E3
+
+      ! for recryst
+      a2short(1)=A1
+      a2short(2)=A2
+      a2short(3)=E1
+      a2short(4)=E2
+      a2short(5)=E3
 
 !    fourth order orientation tensor
       call IBOF(ai,a4)
@@ -1148,9 +1174,12 @@ CONTAINS
 
       CASE(5)
         C0 = -(SD(1)-SD(3))-3._dp*lambda*Deq
-
-        
       END SELECT
+
+      IF (Wn(8).GT.0.0_dp) THEN
+          da2dt_mig = da2dt_DRX_elmer(Stress, a2short, a4)
+          C0 = C0 + Wn(8) * da2dt_mig(COMP)
+      END IF
 
       If (Fond) C0=0._dp
 
@@ -1231,6 +1260,7 @@ CONTAINS
 
 
          END SELECT
+
 
         If (Fond) LoadAtIp=0._dp
         LoadAtIp= LoadAtIp * Basis(p)

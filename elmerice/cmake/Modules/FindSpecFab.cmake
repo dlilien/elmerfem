@@ -29,11 +29,12 @@ FIND_PATH(SpecFab_INCLUDE_DIR
   ${SpecFabLIB}
   )
 
-IF (SpecFab_LIBRARY)
+IF (SpecFab_LIBRARY AND SpecFab_INCLUDE_DIR)
   UNSET(SpecFab_FAILMSG)
   SET(SpecFabLIB_FOUND TRUE)
-  SET(SpecFab_LIBRARIES "${SpecFab_LIBRARY}")
   SET(SpecFab_INCLUDE "${SpecFab_INCLUDE_DIR}")
+  SET(SpecFab_LIBRARIES "${SpecFab_LIBRARY}")
+  SET(SpecFab_INCLUDE_FOUND TRUE)
 ELSE()
   SET(SpecFab_FAILMSG "SpecFab libraries not found.")
 ENDIF()
@@ -47,4 +48,5 @@ MARK_AS_ADVANCED(
   SpecFab_FAILMSG
   SpecFab_LIBRARIES
   SpecFab_INCLUDE
+  SpecFab_INCLUDE_DIR
   SpecFab_LIBRARY)
