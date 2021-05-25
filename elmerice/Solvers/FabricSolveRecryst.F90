@@ -480,7 +480,7 @@
          IF ( TransientSimulation )  CALL Default1stOrderTime(MASS,STIFF,FORCE)
          CALL DefaultUpdateEquations( STIFF, FORCE )
 !------------------------------------------------------------------------------
-      END DO
+      END DO ! Active Elements
       CALL Info( 'FabricSolve', 'Assembly done', Level=4 )
 !------------------------------------------------------------------------------
    
@@ -1178,7 +1178,7 @@ CONTAINS
 
       IF (Wn(8).GT.0.0_dp) THEN
           da2dt_mig = da2dt_DRX_elmer(Stress, a2short, a4)
-          C0 = C0 + Wn(8) * da2dt_mig(COMP)
+          C0 = C0 - Wn(8) * da2dt_mig(COMP)
       END IF
 
       If (Fond) C0=0._dp
