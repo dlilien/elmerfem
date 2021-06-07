@@ -122,11 +122,12 @@
      REAL(KIND=dp), ALLOCATABLE:: MASS(:,:), STIFF(:,:),  &
        LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
        Alpha(:,:),Beta(:), K1(:), K2(:), E1(:), E2(:), E3(:), &
-       Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:)
+       Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:), &
+       A4Full(:,:)
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, K1, K2, &
-          E1, E2, E3, Wn,  FabricGrid, rho, lambda, Velocity, &
+          E1, E2, E3, A4Full, Wn,  FabricGrid, rho, lambda, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
           spoofdim, FabVarName, FirstTime
 !------------------------------------------------------------------------------
@@ -270,7 +271,7 @@
        
        IF ( AllocationsDone ) THEN
          DEALLOCATE( LocalTemperature, &
-                     K1,K2,E1,E2,E3, &
+                     K1,K2,E1,E2,E3,A4Full, &
                      Force, LocalFluidity, &
                      Velocity,MeshVelocity, &
                      MASS,STIFF,      &
@@ -281,12 +282,13 @@
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
                  K1( N ), K2( N ), E1( N ), E2( N ), E3( N ), &
+                 A4Full(9, N), &
                  Force( 2*STDOFs*N ), &
                  Velocity(4, N ),MeshVelocity(3,N), &
                  MASS( 2*STDOFs*N,2*STDOFs*N ),  &
                  STIFF( 2*STDOFs*N,2*STDOFs*N ),  &
                  LOAD( 4,N ), Alpha( 3,N ), Beta( N ), &
-                 CurrFabric( 5*SIZE(Solver % Variable % Values)), &
+                 CurrFabric( 14*SIZE(Solver % Variable % Values)), &
                  TempFabVal( SIZE(FabricValues)), &
                  LocalOOP13(N), LocalOOP23(N), &
                  STAT=istat )
@@ -300,7 +302,7 @@
        TempFabVal = 0.
        IF ( TransientSimulation ) THEN
           IF (AllocationsDone ) DEALLOCATE (PrevFabric)
-          ALLOCATE( PrevFabric( 5*SIZE(Solver % Variable % Values)) )
+          ALLOCATE( PrevFabric( 14*SIZE(Solver % Variable % Values)) )
          PrevFabric = 0.
        END IF
 
@@ -310,13 +312,13 @@
           n = GetElementNOFNodes()
           NodeIndexes => CurrentElement % NodeIndexes
           Indexes(1:n) = Solver % Variable % Perm( Indexes(1:n) )
-          DO COMP=1,5
+          DO COMP=1,14
             IF ( TransientSimulation ) THEN
-               PrevFabric(5*(Indexes(1:n)-1)+COMP) = &
-                   FabricValues(5*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+               PrevFabric(14*(Indexes(1:n)-1)+COMP) = &
+                   FabricValues(14*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
             END IF
-               CurrFabric(5*(Indexes(1:n)-1)+COMP) = &
-                   FabricValues(5*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+               CurrFabric(14*(Indexes(1:n)-1)+COMP) = &
+                   FabricValues(14*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
           END DO
        END DO
 
@@ -375,11 +377,11 @@
 
        PrevUNorm = UNorm
        
-       DO COMP=1,2*spoofdim-1
+       DO COMP=1,14
 
-       Solver % Variable % Values = CurrFabric( COMP::5 )
+       Solver % Variable % Values = CurrFabric( COMP::14 )
        IF ( TransientSimulation ) THEN
-          Solver % Variable % PrevValues(:,1) = PrevFabric( COMP::5 )
+          Solver % Variable % PrevValues(:,1) = PrevFabric( COMP::14 )
        END IF
 
        CALL DefaultInitialize()
@@ -430,11 +432,14 @@
             LocalTemperature(1:n) = 0.0d0
          END IF
 
-         K1(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+1 )
-         K2(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+2 )
-         E1(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+3 )
-         E2(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+4 )
-         E3(1:n) = CurrFabric( 5*(Solver % Variable % Perm(Indexes(1:n))-1)+5 )
+         K1(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+1 )
+         K2(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+2 )
+         E1(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+3 )
+         E2(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+4 )
+         E3(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+5 )
+         DO i = 1,9
+            A4Full(i, 1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+i )
+         END DO
 
          k = FlowVariable % DOFs
          Velocity = 0.0d0
@@ -458,19 +463,19 @@
              LocalOOP23 = 0.0_dp
              LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
              CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
+               E2, E3,A4Full, LocalTemperature, LocalFluidity,  Velocity, &
                MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
                LocalOOP23, LocalOOP13)
          Else If ( OOPlaneRot23 ) THEN
              LocalOOP23 = 0.0_dp
              LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
              CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
+               E2, E3,A4Full, LocalTemperature, LocalFluidity,  Velocity, &
                MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
                LocalOOP23)
          ELSE
              CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3, LocalTemperature, LocalFluidity,  Velocity, &
+               E2, E3,A4Full, LocalTemperature, LocalFluidity,  Velocity, &
                MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda )
          END IF
 
@@ -623,7 +628,6 @@
 !     Solve the system and check for convergence
 !------------------------------------------------------------------------------
       Unorm = DefaultSolve()
-!      CurrFabric( COMP::5 ) = Solver % Variable % Values
       WRITE(Message,*) 'solve done', minval( solver % variable % values), maxval( Solver % variable % values)
       CALL Info( 'FabricSolve', Message, Level=4 )
       
@@ -631,10 +635,9 @@
       ALLOCATE( Ref(n1) )
       Ref = 0
       !
-      ! FabricValues( COMP::5 ) = 0 !fab sinon remet toutes les
       ! fabriques à 0 dans le cas ou on a 2 domaines dont l'un a la
       ! fabrique fixe
-      TempFabVal(COMP::5 ) = 0. !fab
+      TempFabVal(COMP::14 ) = 0. !fab
       
       DO t=1,Solver % NumberOfActiveElements
          Element => GetActiveElement(t) 
@@ -643,11 +646,11 @@
          
          DO i=1,n
             k = Element % NodeIndexes(i)
-            TempFabVal( 5*(FabricPerm(k)-1) + COMP ) =    & 
-            TempFabVal( 5*(FabricPerm(k)-1) + COMP ) + &
+            TempFabVal( 14*(FabricPerm(k)-1) + COMP ) =    & 
+            TempFabVal( 14*(FabricPerm(k)-1) + COMP ) + &
             Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) )
-            FabricValues( 5*(FabricPerm(k)-1) + COMP ) = &
-                          TempFabVal(5*(FabricPerm(k)-1) + COMP ) 
+            FabricValues( 14*(FabricPerm(k)-1) + COMP ) = &
+                          TempFabVal(14*(FabricPerm(k)-1) + COMP ) 
             Ref(k) = Ref(k) + 1
          END DO
       END DO
@@ -656,8 +659,8 @@
          j=FabricPerm(i)
          IF (j < 1) CYCLE
          IF ( Ref(i) > 0 ) THEN
-            FabricValues( 5*(j-1)+COMP ) = &
-                   FabricValues( 5*(j-1)+COMP ) / Ref(i)
+            FabricValues( 14*(j-1)+COMP ) = &
+                   FabricValues( 14*(j-1)+COMP ) / Ref(i)
          END IF
       END DO
 
@@ -665,12 +668,12 @@
 
       SELECT CASE( Comp ) 
       CASE(1)
-      FabricValues( COMP:SIZE(FabricValues):5 ) = &
-          MIN(MAX( FabricValues( COMP:SIZE(FabricValues):5 ) , 0._dp),1._dp)
+      FabricValues( COMP:SIZE(FabricValues):14 ) = &
+          MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),1._dp)
           
       CASE(2)
-       FabricValues( COMP:SIZE(FabricValues):5 ) = &
-       MIN(MAX( FabricValues( COMP:SIZE(FabricValues):5 ) , 0._dp),1._dp)
+       FabricValues( COMP:SIZE(FabricValues):14 ) = &
+       MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),1._dp)
        
      !  !DO i=1,SIZE(FabricValues),5 
      !  !  IF((FabricValues(i)+FabricValues(i+1)).GT.1._dp) THEN
@@ -701,9 +704,9 @@
           n = GetElementNOFNodes()
           NodeIndexes => CurrentElement % NodeIndexes
           Indexes(1:n) = Solver % Variable % Perm( Indexes(1:n) )
-          DO COMP=1,5
-            CurrFabric(5*(Indexes(1:n)-1)+COMP) = &
-                        FabricValues(5*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
+          DO COMP=1,14
+            CurrFabric(14*(Indexes(1:n)-1)+COMP) = &
+                        FabricValues(14*(FabricPerm(NodeIndexes(1:n))-1)+COMP)
           END DO
        END DO
 
@@ -742,11 +745,11 @@
            n = GetElementNOFNodes()
            NodeIndexes => CurrentElement % NodeIndexes
 
-           K1(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+1 )
-           K2(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+2 )
-           E1(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+3 )
-           E2(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+4 )
-           E3(1:n) = FabricValues( 5*(FabricPerm(NodeIndexes(1:n))-1)+5 )
+           K1(1:n) = FabricValues( 14*(FabricPerm(NodeIndexes(1:n))-1)+1 )
+           K2(1:n) = FabricValues( 14*(FabricPerm(NodeIndexes(1:n))-1)+2 )
+           E1(1:n) = FabricValues( 14*(FabricPerm(NodeIndexes(1:n))-1)+3 )
+           E2(1:n) = FabricValues( 14*(FabricPerm(NodeIndexes(1:n))-1)+4 )
+           E3(1:n) = FabricValues( 14*(FabricPerm(NodeIndexes(1:n))-1)+5 )
          
            Do i=1,n
             a2(1)=K1(i)
@@ -860,12 +863,13 @@ CONTAINS
 !------------------------------------------------------------------------------
       SUBROUTINE LocalMatrix( Comp, MASS, STIFF, FORCE, LOAD, &
           NodalK1, NodalK2, NodalEuler1, NodalEuler2, NodalEuler3, & 
+          NodalA4, &
           NodalTemperature, NodalFluidity, NodalVelo, NodMeshVel, &
           Element, n, Nodes, Wn, rho,lambda,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
 
      REAL(KIND=dp) :: STIFF(:,:),MASS(:,:)
-     REAL(KIND=dp) :: LOAD(:,:), NodalVelo(:,:),NodMeshVel(:,:)
+     REAL(KIND=dp) :: LOAD(:,:),NodalVelo(:,:),NodMeshVel(:,:),NodalA4(:,:)
      REAL(KIND=dp), DIMENSION(:) :: FORCE, NodalK1, NodalK2, NodalEuler1, &
                NodalEuler2, NodalEuler3, NodalTemperature, NodalFluidity
      REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
