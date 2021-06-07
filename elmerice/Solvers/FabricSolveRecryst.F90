@@ -1176,10 +1176,6 @@ CONTAINS
         C0 = -(SD(1)-SD(3))-3._dp*lambda*Deq
       END SELECT
 
-      IF (Wn(8).GT.0.0_dp) THEN
-          da2dt_mig = da2dt_DRX_elmer(Stress, a2short, a4)
-          C0 = C0 - Wn(8) * da2dt_mig(COMP)
-      END IF
 
       If (Fond) C0=0._dp
 
@@ -1260,6 +1256,12 @@ CONTAINS
 
 
          END SELECT
+
+          IF (Wn(8).GT.0.0_dp) THEN
+              ! Normalization issue means the / 3.0 is needed
+              da2dt_mig = da2dt_DRX_elmer(Stress, a2short, a4)
+              LoadAtIp= LoadAtIp + Wn(8) * da2dt_mig(COMP)
+          END IF
 
 
         If (Fond) LoadAtIp=0._dp
