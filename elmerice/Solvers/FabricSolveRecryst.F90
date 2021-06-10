@@ -123,11 +123,11 @@
        LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
        Alpha(:,:),Beta(:), K1(:), K2(:), E1(:), E2(:), E3(:), &
        Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:), &
-       A4Full(:,:)
+       LocalA4(:,:)
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, K1, K2, &
-          E1, E2, E3, A4Full, Wn,  FabricGrid, rho, lambda, Velocity, &
+          E1, E2, E3, LocalA4, Wn,  FabricGrid, rho, lambda, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
           spoofdim, FabVarName, FirstTime
 !------------------------------------------------------------------------------
@@ -271,7 +271,7 @@
        
        IF ( AllocationsDone ) THEN
          DEALLOCATE( LocalTemperature, &
-                     K1,K2,E1,E2,E3,A4Full, &
+                     K1,K2,E1,E2,E3,LocalA4, &
                      Force, LocalFluidity, &
                      Velocity,MeshVelocity, &
                      MASS,STIFF,      &
@@ -282,7 +282,7 @@
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
                  K1( N ), K2( N ), E1( N ), E2( N ), E3( N ), &
-                 A4Full(9, N), &
+                 LocalA4(9, N), &
                  Force( 2*STDOFs*N ), &
                  Velocity(4, N ),MeshVelocity(3,N), &
                  MASS( 2*STDOFs*N,2*STDOFs*N ),  &
@@ -438,7 +438,7 @@
          E2(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+4 )
          E3(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+5 )
          DO i = 1,9
-            A4Full(i, 1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+i )
+            LocalA4(i, 1:n) = CurrFabric( 14*(Solver % Variable %Perm(Indexes(1:n))-1)+i+5 )
          END DO
 
          k = FlowVariable % DOFs
@@ -463,19 +463,19 @@
              LocalOOP23 = 0.0_dp
              LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
              CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3,A4Full, LocalTemperature, LocalFluidity,  Velocity, &
+               E2, E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
                MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
                LocalOOP23, LocalOOP13)
          Else If ( OOPlaneRot23 ) THEN
              LocalOOP23 = 0.0_dp
              LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
              CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3,A4Full, LocalTemperature, LocalFluidity,  Velocity, &
+               E2, E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
                MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
                LocalOOP23)
          ELSE
              CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3,A4Full, LocalTemperature, LocalFluidity,  Velocity, &
+               E2, E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
                MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda )
          END IF
 
@@ -666,6 +666,7 @@
 
       DEALLOCATE( Ref )
 
+      ! This is just numerical protection...
       SELECT CASE( Comp ) 
       CASE(1)
       FabricValues( COMP:SIZE(FabricValues):14 ) = &
@@ -675,25 +676,6 @@
        FabricValues( COMP:SIZE(FabricValues):14 ) = &
        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),1._dp)
        
-     !  !DO i=1,SIZE(FabricValues),5 
-     !  !  IF((FabricValues(i)+FabricValues(i+1)).GT.1._dp) THEN
-     !  !      A1plusA2=FabricValues(i)+FabricValues(i+1)
-     !  !      FabricValues(i)= &
-     !  !        FabricValues(i)/A1plusA2
-     !  !      FabricValues(i+1)= &
-     !  !        FabricValues(i+1)/A1plusA2
-     !  !   END IF
-     !  ! END DO
-     !   
-
-!      CASE(3:5)
-!       DO i=COMP,SIZE(FabricValues),5
-!         IF(FabricValues(i).GT.0._dp) THEN
-!               FabricValues(i) = MIN( FabricValues(i) , 0.5_dp)
-!         ELSE
-!               FabricValues(i) = MAX( FabricValues(i) , -0.5_dp)
-!         END IF
-!       END DO
       END SELECT
 
       END DO ! End DO Comp
@@ -888,6 +870,7 @@ CONTAINS
      REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
      REAL(KIND=dp) :: rho,lambda,Deq,ai(6),a4(9),hmax,a2short(5),da2dt_mig(5)
+     REAL(KIND=dp) :: a6(13)
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
@@ -920,6 +903,12 @@ CONTAINS
            USE Types
            REAL(KIND=dp),intent(in) :: ai(6)
            REAL(KIND=dp),intent(out) :: a4(9)
+        END SUBROUTINE
+
+        SUBROUTINE LinA6C(ai,a4,a6)
+           USE Types
+           REAL(KIND=dp),intent(in) :: ai(6), a4(9)
+           REAL(KIND=dp),intent(out) :: a6(13)
         END SUBROUTINE
 
         Subroutine R2Ro(ai,dim,spoofdim,a2,angle)
@@ -1000,23 +989,23 @@ CONTAINS
       E1 = SUM( NodalEuler1(1:n) * Basis(1:n) )
       E2 = SUM( NodalEuler2(1:n) * Basis(1:n) )
       E3 = SUM( NodalEuler3(1:n) * Basis(1:n) )
-!
-!      Fluidity  at the integration point:
-!---------------------------------------------
-!       Wn(1)=SUM( NodalFluidity(1:n)*Basis(1:n) )
-!
-!     Temperature at the integration point:
-!     -------------------------------------
-!      Temperature = SUM( NodalTemperature(1:n)*Basis(1:n) )
-!
-!     Get theta parameter: (the (fluidity in the basal plane)/2, 
-!     function of the Temperature )
-!     -----------------------------------------------------
+
+      ai(1)=A1
+      ai(2)=A2
+      ai(3)=A3
+      ai(4)=E1
+      ai(5)=E2
+      ai(6)=E3
+
+      CALL IBOF(ai, a4)
+
+      DO i=1,9
+       a4(i) = SUM(NodalA4(i,1:n)*Basis(1:n))
+      END DO
+
+
+
       Theta = 1._dp / ( FabricGrid(5) + FabricGrid(6) )
-      !Theta = Theta 
-
-!      Strain-Rate, Stresses and Spin
-
       CSymmetry = CurrentCoordinateSystem() == AxisSymmetric
       
       Stress = 0.0
@@ -1026,32 +1015,19 @@ CONTAINS
 !    Material parameters at that point
 !    ---------------------------------
 !
-      ai(1)=A1
-      ai(2)=A2
-      ai(3)=A3
-      ai(4)=E1
-      ai(5)=E2
-      ai(6)=E3
-
       ! for recryst
       a2short(1)=A1
       a2short(2)=A2
       a2short(3)=E1
       a2short(4)=E2
       a2short(5)=E3
-
-!    fourth order orientation tensor
-      call IBOF(ai,a4)
-!! a2 rentre dans l'ordre : 11, 22, 33, 12, 23 ,13
-!!!a4  sort dans l'ordre : 1111, 2222, 1122, 1123, 2231, 1131, 1112, 2223, 2212
-      
-!     A2 expressed in the orthotropic frame
-!
       call R2Ro(ai,dim,spoofdim,ap,angle)
-
-!     Get viscosity
-
       CALL OPILGGE_ai_nl(ap, Angle, FabricGrid, C)
+
+      !!!!!!!!!!!!!!!!!!!!
+      ! Closure
+      !!!!!!!!!!!!!!!!!!!!
+      CALL LinA6C(ai, a4, a6)
 
 !    Compute strainRate and Spin :
 !    -----------------------------
@@ -1161,6 +1137,7 @@ CONTAINS
 !
 !     Reaction coefficient:
 !     ---------------------
+      C0 = 0.0_dp
       SELECT CASE(comp)
       CASE(1)
         !C0 = -2._dp*(SD(1)-SD(3))
@@ -1178,6 +1155,28 @@ CONTAINS
 
       CASE(5)
         C0 = -(SD(1)-SD(3))-3._dp*lambda*Deq
+
+      ! Beginning a4
+      ! note that this is negated, because we put it on the side with
+      ! the derivative
+      CASE(6)
+          C0 = -2.0_dp * (SD(1) - SD(3))
+      CASE(7)
+          C0 = -2.0_dp * (SD(2) - SD(3))
+      CASE(8)
+          C0 = -(SD(1) + SD(2) - 2.0_dp * SD(3))
+      CASE(9)
+          C0 = -(SD(1) - SD(3))
+      CASE(10)
+          C0 = -(SD(1) - SD(3))
+      CASE(11)
+          C0 = -(SD(1) - SD(3))
+      CASE(12)
+          C0 = -(SD(1) + SD(2) - 2.0_dp * SD(3))
+      CASE(13)
+          C0 = -(SD(2) - SD(3))
+      CASE(14)
+          C0 = -(SD(1) + SD(2) - 2.0_dp * SD(3))
       END SELECT
 
 
@@ -1214,51 +1213,116 @@ CONTAINS
          SELECT CASE(comp)
          
          CASE(1)
-         
+          ! a2_1=A1=A2_11
           LoadAtIp = 2._dp*( Spin(1)*E1 + SD(4)*(2._dp*a4(7)-E1) + &
           SD(1)*a4(1) + SD(2)*a4(3) - SD(3)*(-A1+a4(1)+a4(3)) ) + & 
                       lambda*Deq
-
           IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( -Spin(3)*E3 + &
             SD(6)*(2._dp*a4(6)-E3) + 2._dp*SD(5)*a4(4) )
           END IF
-          
-         
          CASE(2)
+          ! a2_2=A2=A2_22
           LoadAtIp = 2._dp*( -Spin(1)*E1 + SD(4)*(2._dp*a4(9)-E1) + &
           SD(2)*a4(2) + SD(1)*a4(3) - SD(3)*(-A2+a4(2)+a4(3)) )  +  &
                         lambda*Deq
-          
           IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( Spin(2)*E2 + &
             SD(5)*(2._dp*a4(8)-E2) + 2._dp*SD(6)*a4(5) )
           END IF
-
-
          CASE(3)
+          ! a2_3=E1=A2_12
           LoadAtIp = Spin(1)*(A2-A1)  +  SD(4)*(4._dp*a4(3)-A1-A2) + &
           2._dp* ( SD(1)*a4(7) + SD(2)*a4(9) - SD(3)*(-E1+a4(7)+a4(9)) )
-          
           IF(spoofdim == 3) THEN
            LoadAtIp =  LoadAtIp - Spin(3)*E2 + Spin(2)*E3  &
            + SD(6)*(4._dp*a4(4)-E2) + SD(5)*(4._dp*a4(5)-E3)  
           END IF
-           
          CASE(4)
+          ! a2_4=E2=A2_23
           LoadAtIp = Spin(2)*(A3-A2) +  Spin(3)*E1 - Spin(1)*E3 +&
           SD(4)*(4._dp*a4(5)-E3) + SD(5)*(3._dp*A2-A3-4._dp*(a4(2)+a4(3))) &
           + SD(6)*(3._dp*E1-4._dp*(a4(7)+a4(9))) + &
           2._dp*( SD(1)*a4(4) + SD(2)*a4(8) - SD(3)*(a4(4)+a4(8)) )
-
          CASE(5)
+          ! a2_5=E3=A2_13
           LoadAtIp = Spin(3)*(A1-A3) +  Spin(1)*E2 - Spin(2)*E1 +&
            SD(4)*(4._dp*a4(4)-E2) + &
           SD(6)*(3._dp*A1-A3-4.*(a4(1)+a4(3))) + SD(5)*(3._dp*E1-4._dp*(a4(7)+a4(9))) + &
           2._dp*( SD(1)*a4(6) + SD(2)*a4(5) - SD(3)*(a4(6)+a4(5)) )
-
-
-
+         CASE(6)
+           ! A4_1=a4_1111
+           LoadAtIp = 2.0_dp * (Spin(1)*A4(7) - Spin(3)*a4(6))&
+                        -2.0_dp * (SD(4)*(a4(7) - 2.0_dp*a6(3)) +&
+                                  SD(6)*(a4(6) - 2.0_dp*a6(8)) -&
+                                  SD(1)*a6(1) - SD(2)*a6(4)+&
+                                  SD(3)*(a6(1)+a6(4)) - 2.0_dp*SD(5)*a6(9))
+         CASE(7)
+           ! A4_2=a4_2222
+           LoadAtIp = 2.0_dp * (Spin(2)*A4(8) - Spin(3)*a4(7))&
+                       -2.0_dp * (SD(4)*(a4(9) - 2.0_dp * a6(7)) +&
+                                  SD(5)*(a4(8) - 2.0_dp * a6(13)) -&
+                                  SD(1)*a6(6)-SD(2)*a6(2)+&
+                                  SD(3)*(a6(2) + a6(6)) - 2.0_dp*SD(6)*a6(12))
+         CASE(8)
+           ! A4_3=a4_1122
+           LoadAtIP = (Spin(1)*(A4(9)-A4(7)) - Spin(2)*A4(4) - Spin(3)*a4(5))&
+                       -SD(4) *(A4(9)+A4(7)-4.0_dp*a6(10))&
+                       -SD(5)*(a4(4)-4.0_dp*a6(11))&
+                       -SD(6) * (a4(5)-4.0_dp*a6(10))&
+                       +2.0_dp * SD(1) * a6(4)&
+                       +2.0_dp * SD(2) * a6(6)&
+                       -2.0_dp * SD(3) *(a6(4) + a6(6))
+         CASE(9)
+           ! A4_4=a4_1123
+           LoadAtIP = (Spin(1)*A4(5) - Spin(2)*A4(3) - Spin(3)*(E1-2.0_dp*A4(1)-A4(3)))&
+                       -SD(4) * (A4(5) - 4.0_dp * a6(10))&
+                       -SD(5) * (-3.0_dp * a4(3) + 4.0_dp * a6(4) + 4.0_dp * a6(6))&
+                       -SD(6)*(E1-a4(9) - 4.0_dp*(a4(7)-a6(3)-a6(5)))&
+                       +2.0_dp * SD(1) * a6(9)& 
+                       +2.0_dp * SD(2) * a6(11)& 
+                       +2.0_dp * SD(3) * (a6(9) + a6(11)) 
+         CASE(10)
+           ! A4_5=a4_1223
+           LoadAtIP = (Spin(1)*A4(8) - Spin(2)*A4(9) - Spin(3)*(E1-2.0_dp*A4(3)-A4(2)))&
+                       -SD(4) * (a4(8) - 4.0_dp * a6(11))&
+                       -SD(5) * (-3.0_dp * a4(9) + 4.0_dp * a6(5) + 4.0_dp * a6(7))&
+                       -SD(6)*(A2-a4(2) - 4.0_dp*(a4(3)-a6(4)-a6(6)))&
+                       +2.0_dp * SD(1) * a6(10)& 
+                       +2.0_dp * SD(2) * a6(12)& 
+                       +2.0_dp * SD(3) * (a6(10) + a6(12)) 
+         CASE(11)
+           ! A4_6=a4_1113
+           LoadAtIP = (Spin(1)*A4(4) - Spin(2)*A4(7) - Spin(3)*(A1-2.0_dp*A4(1)-A4(3)))&
+                       -SD(4) * (a4(4) + a4(1) - 4.0_dp * a6(9))&
+                       -SD(5) * (-3.0_dp * a4(7) + 4.0_dp * a6(3) + 4.0_dp * a6(5))&
+                       -SD(6)*(A1-5.0_dp * a4(1) - a4(3)+ 4.0_dp * a6(1) + 4.0_dp * a6(4))&
+                       -2.0_dp * (SD(3) - SD(1)) * a6(8)&
+                       -2.0_dp * (SD(3) - SD(2)) * a6(10)
+         CASE(12)
+           ! A4_7=a4_1112
+           LoadAtIP = (Spin(1)*(A4(3)-A4(1)) - Spin(2)*A4(6) - Spin(3)*a4(4))&
+                        -SD(4) *(A4(3) + A4(2) - 4.0_dp*a6(4))&
+                        -SD(5)*(a4(6)-4.0_dp*a6(11))&
+                        -SD(6) * (a4(4)-4.0_dp*a6(9))&
+                        -2.0_dp * (SD(3) - SD(1)) * a6(3)&
+                        -2.0_dp * (SD(3) - SD(2)) * a6(5)
+         CASE(13)
+           ! A4_8=a4_2223
+           LoadAtIP = (-Spin(1)*A4(5) - Spin(2)*(A4(2)+A4(3)) + Spin(3)*A4(9))&
+                      -SD(4) * (a4(3) + a4(9) - 4.0_dp * a6(12))&
+                      -SD(5) * (-3.0_dp * a4(2) + 4.0_dp * a6(2) + 4.0_dp * a6(6))&
+                      -SD(6)*(A2-5.0_dp * a4(2) - a4(3)+ 4.0_dp*(a4(9) - a6(5) - a6(7)))&
+                      -2.0_dp * (SD(3) - SD(1)) * a6(11)&
+                      -2.0_dp * (SD(3) - SD(2)) * a6(13)
+         CASE(14)
+           ! A4_9=a4_1222
+           LoadAtIP = (Spin(1)*(A4(2)-A4(3)) - Spin(2)*A4(5) - Spin(3)*a4(8))&
+                       -SD(4) *(A4(2) + A4(3) - 4.0_dp*a6(6))&
+                       -SD(5)*(a4(5)-4.0_dp*a6(12))&
+                       -SD(6) * (a4(8)-4.0_dp*a6(11))&
+                       -2.0_dp * (SD(3) - SD(1)) * a6(5)&
+                       -2.0_dp * (SD(3) - SD(2)) * a6(7)
          END SELECT
 
           IF (Wn(8).GT.0.0_dp) THEN
