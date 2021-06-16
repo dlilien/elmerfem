@@ -192,6 +192,12 @@
         CALL FATAL('FabricSolveRecryst', Message)
       END IF
 
+      IF (FabricSol % DOFs .NE. 14) THEN
+        WRITE(Message,'(A,A,A)') 'Fabric variable ', FabVarName,&
+                                 ' must have 14 DoFs'
+        CALL FATAL('FabricSolveRecryst', Message)
+      END IF
+
       TempVar = ListGetString( SolverParams,'Temperature Solution Name',&
             GotIt,UnFoundFatal=.FALSE. )
       IF (.NOT.GotIt) THEN
@@ -675,7 +681,16 @@
       CASE(2)
        FabricValues( COMP:SIZE(FabricValues):14 ) = &
        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),1._dp)
-       
+      ! CASE(6)
+      !  FabricValues( COMP:SIZE(FabricValues):14 ) = &
+      !  MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 1:SIZE(FabricValues):14 ))
+      ! CASE(7)
+      !  FabricValues( COMP:SIZE(FabricValues):14 ) = &
+      !  MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 2:SIZE(FabricValues):14 ))
+
+      ! CASE(8)
+      !  FabricValues( COMP:SIZE(FabricValues):14 ) = &
+      !  MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 1:SIZE(FabricValues):14 ))
       END SELECT
 
       END DO ! End DO Comp
@@ -870,7 +885,7 @@ CONTAINS
      REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
      REAL(KIND=dp) :: rho,lambda,Deq,ai(6),a4(9),hmax,a2short(5),da2dt_mig(5)
-     REAL(KIND=dp) :: a6(13)
+     REAL(KIND=dp) :: a6(13), a6c(13)
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
@@ -997,8 +1012,6 @@ CONTAINS
       ai(5)=E2
       ai(6)=E3
 
-      CALL IBOF(ai, a4)
-
       DO i=1,9
        a4(i) = SUM(NodalA4(i,1:n)*Basis(1:n))
       END DO
@@ -1027,7 +1040,9 @@ CONTAINS
       !!!!!!!!!!!!!!!!!!!!
       ! Closure
       !!!!!!!!!!!!!!!!!!!!
-      CALL LinA6C(ai, a4, a6)
+      ! CALL LinA6C(ai, a4, a6)
+
+      a6 = a6_CBT_elmer(a2short, a4)
 
 !    Compute strainRate and Spin :
 !    -----------------------------
@@ -1122,68 +1137,23 @@ CONTAINS
         Spin(i)=Spin1(INDi(i+3),INDj(i+3))
       End do
 
-      Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
-                             (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
-      Deq=Deq * EXP(LOG(10.0_dp) * sum(NodalTemperature(1:n) * Basis(1:n)) / 10.0_dp)
-!
-!     Velocity :
-!     ----------
+      ! Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
+      !                        (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
+      ! write(*,*) Deq
+      ! Deq = Deq * Lambda
+      Deq = Lambda
+
       Velo = 0.0d0
       DO i=1,spoofdim
          Velo(i) = SUM( Basis(1:n) * (NodalVelo(i,1:n) - NodMeshVel(i,1:n)) )
       END DO
       Unorm = SQRT( SUM( Velo**2._dp ) )
 
-!
-!     Reaction coefficient:
-!     ---------------------
-      C0 = 0.0_dp
-      SELECT CASE(comp)
-      CASE(1)
-        !C0 = -2._dp*(SD(1)-SD(3))
-        C0=-2._dp*SD(1)-3._dp*lambda*Deq
-      CASE(2)
-        !C0 = -2._dp*(SD(2)-SD(3))
-        C0 = -2._dp*SD(2)-3._dp*lambda*Deq
-       
-      CASE(3)
-        !C0 = -(SD(1)+SD(2)-2._dp*SD(3))
-        C0 = -(SD(1)+SD(2))-3._dp*lambda*Deq
-        
-      CASE(4)
-        C0 = -(SD(2)-SD(3))-3._dp*lambda*Deq
-
-      CASE(5)
-        C0 = -(SD(1)-SD(3))-3._dp*lambda*Deq
-
-      ! Beginning a4
-      ! note that this is negated, because we put it on the side with
-      ! the derivative
-      CASE(6)
-          C0 = -2.0_dp * (SD(1) - SD(3))
-      CASE(7)
-          C0 = -2.0_dp * (SD(2) - SD(3))
-      CASE(8)
-          C0 = -(SD(1) + SD(2) - 2.0_dp * SD(3))
-      CASE(9)
-          C0 = -(SD(1) - SD(3))
-      CASE(10)
-          C0 = -(SD(1) - SD(3))
-      CASE(11)
-          C0 = -(SD(1) - SD(3))
-      CASE(12)
-          C0 = -(SD(1) + SD(2) - 2.0_dp * SD(3))
-      CASE(13)
-          C0 = -(SD(2) - SD(3))
-      CASE(14)
-          C0 = -(SD(1) + SD(2) - 2.0_dp * SD(3))
-      END SELECT
-
-
       If (Fond) C0=0._dp
 
-!     Loop over basis functions (of both unknowns and weights):
-!     ---------------------------------------------------------
+      c0 = 0.0_dp
+      CALL daidt_COMB_elmer(COMP, SD, Stress, Spin1, a2short, a4, &
+                            Wn(9), Deq, Wn(8), LoadAtIp)
       DO p=1,NBasis
          DO q=1,NBasis
             A = 0.0d0
@@ -1206,17 +1176,89 @@ CONTAINS
             STIFF( p,q ) = STIFF( p,q ) + s * A
          END DO
 
+        If (Fond) LoadAtIp=0._dp
+        FORCE(p) = FORCE(p) + s*LoadAtIp*Basis(p)
+      END DO
 
-!
-!        The righthand side...:
-!        ----------------------
+              
+      END DO 
+
+ 1000 FORMAT((a),x,i2,x,6(e13.5,x)) 
+ 1001 FORMAT(6(e13.5,x))
+!------------------------------------------------------------------------------
+       END SUBROUTINE LocalMatrix
+!------------------------------------------------------------------------------
+
+      SUBROUTINE LHS(COMP, A1, A2, A3, E1, E2, E3, a4, a6, SD, Spin,&
+                     Deq, spoofdim, C0)
+         IMPLICIT NONE
+         REAL(KIND=dp) :: A1, A2, A3, E1, E2, E3, Theta
+
+         REAL(KIND=dp), intent(out):: C0
+         REAL(KIND=dp) :: Deq,a4(9)
+         REAL(KIND=dp) :: a6(13)
+         INTEGER :: COMP, spoofdim
+         REAL(KIND=dp) :: Spin(3),SD(6)
+      C0 = 0.0_dp
+      SELECT CASE(comp)
+      CASE(1)
+        !C0 = -2._dp*(SD(1)-SD(3))
+        C0=-2._dp*SD(1)-3._dp*Deq
+      CASE(2)
+        !C0 = -2._dp*(SD(2)-SD(3))
+        C0 = -2._dp*SD(2)-3._dp*Deq
+       
+      CASE(3)
+        !C0 = -(SD(1)+SD(2)-2._dp*SD(3))
+        C0 = -(SD(1)+SD(2))-3._dp*Deq
+        
+      CASE(4)
+        C0 = -(SD(2)-SD(3))-3._dp*Deq
+
+      CASE(5)
+        C0 = -(SD(1)-SD(3))-3._dp*Deq
+
+      ! Beginning a4
+      ! note that this is negated, because we put it on the side with
+      ! the derivative
+      CASE(6)
+          C0 = -4.0_dp * (SD(1) - SD(3))
+      CASE(7)
+          C0 = -4.0_dp * (SD(2) - SD(3))
+      CASE(8)
+          C0 = -2.0_dp * (SD(1) + SD(2) - 2.0_dp * SD(3))
+      CASE(9)
+          C0 = -2.0_dp * (SD(1) - SD(3))
+      CASE(10)
+          C0 = -2.0_dp * (SD(1) - SD(3))
+      CASE(11)
+          C0 = -2.0_dp * (SD(1) - SD(3))
+      CASE(12)
+          C0 = -2.0_dp * (SD(1) + SD(2) - 2.0_dp * SD(3))
+      CASE(13)
+          C0 = -2.0_dp * (SD(2) - SD(3))
+      CASE(14)
+          C0 = -2.0_dp * (SD(1) + SD(2) - 2.0_dp * SD(3))
+      END SELECT
+      END SUBROUTINE LHS
+
+      SUBROUTINE RHS(COMP, A1, A2, A3, E1, E2, E3, a4, a6, SD, Spin,&
+                     Deq, spoofdim, LoadAtIp)
+         IMPLICIT NONE
+         REAL(KIND=dp) :: A1, A2, A3, E1, E2, E3, Theta
+         REAL(KIND=dp), intent(out):: LoadAtIp
+         REAL(KIND=dp) :: Deq,a4(9)
+         REAL(KIND=dp) :: a6(13)
+         INTEGER :: COMP, spoofdim
+         REAL(KIND=dp) :: Spin(3),SD(6)
+         LoadAtIp = 0.0_dp
          SELECT CASE(comp)
          
          CASE(1)
           ! a2_1=A1=A2_11
           LoadAtIp = 2._dp*( Spin(1)*E1 + SD(4)*(2._dp*a4(7)-E1) + &
           SD(1)*a4(1) + SD(2)*a4(3) - SD(3)*(-A1+a4(1)+a4(3)) ) + & 
-                      lambda*Deq
+                      Deq
           IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( -Spin(3)*E3 + &
             SD(6)*(2._dp*a4(6)-E3) + 2._dp*SD(5)*a4(4) )
@@ -1225,7 +1267,7 @@ CONTAINS
           ! a2_2=A2=A2_22
           LoadAtIp = 2._dp*( -Spin(1)*E1 + SD(4)*(2._dp*a4(9)-E1) + &
           SD(2)*a4(2) + SD(1)*a4(3) - SD(3)*(-A2+a4(2)+a4(3)) )  +  &
-                        lambda*Deq
+                        Deq
           IF(spoofdim == 3) THEN
             LoadAtIp =  LoadAtIp + 2._dp*( Spin(2)*E2 + &
             SD(5)*(2._dp*a4(8)-E2) + 2._dp*SD(6)*a4(5) )
@@ -1252,99 +1294,84 @@ CONTAINS
           2._dp*( SD(1)*a4(6) + SD(2)*a4(5) - SD(3)*(a4(6)+a4(5)) )
          CASE(6)
            ! A4_1=a4_1111
-           LoadAtIp = 2.0_dp * (Spin(1)*A4(7) - Spin(3)*a4(6))&
-                        -2.0_dp * (SD(4)*(a4(7) - 2.0_dp*a6(3)) +&
-                                  SD(6)*(a4(6) - 2.0_dp*a6(8)) -&
-                                  SD(1)*a6(1) - SD(2)*a6(4)+&
-                                  SD(3)*(a6(1)+a6(4)) - 2.0_dp*SD(5)*a6(9))
+           LoadAtIp = 4.0_dp * (Spin(1)*A4(7) - Spin(3)*a4(6))&
+                        -4.0_dp*SD(4)*(a4(7) - 2.0_dp*a6(3))&
+                        -4.0_dp*SD(6)*(a4(6) - 2.0_dp*a6(8))&
+                        +4.0_dp*SD(1)*a6(1)&
+                        +4.0_dp*SD(2)*a6(4)&
+                        -4.0_dp*SD(3)*(a6(1)+a6(4))&
+                        +8.0_dp*SD(5)*a6(9)
+
          CASE(7)
            ! A4_2=a4_2222
-           LoadAtIp = 2.0_dp * (Spin(2)*A4(8) - Spin(3)*a4(7))&
-                       -2.0_dp * (SD(4)*(a4(9) - 2.0_dp * a6(7)) +&
-                                  SD(5)*(a4(8) - 2.0_dp * a6(13)) -&
-                                  SD(1)*a6(6)-SD(2)*a6(2)+&
-                                  SD(3)*(a6(2) + a6(6)) - 2.0_dp*SD(6)*a6(12))
+           LoadAtIp = 4.0_dp * (Spin(2)*A4(8) - Spin(1)*a4(9))&
+                       -4.0_dp*SD(4)*(a4(9) - 2.0_dp * a6(7))&
+                       -4.0_dp*SD(5)*(a4(8) - 2.0_dp * a6(13))&
+                       +4.0_dp*SD(1)*a6(6)&
+                       +4.0_dp*SD(2)*a6(2)&
+                       -4.0_dp*SD(3)*(a6(2) + a6(6))&
+                       +8.0_dp*SD(6)*a6(12)
          CASE(8)
            ! A4_3=a4_1122
-           LoadAtIP = (Spin(1)*(A4(9)-A4(7)) - Spin(2)*A4(4) - Spin(3)*a4(5))&
-                       -SD(4) *(A4(9)+A4(7)-4.0_dp*a6(10))&
-                       -SD(5)*(a4(4)-4.0_dp*a6(11))&
-                       -SD(6) * (a4(5)-4.0_dp*a6(10))&
-                       +2.0_dp * SD(1) * a6(4)&
-                       +2.0_dp * SD(2) * a6(6)&
-                       -2.0_dp * SD(3) *(a6(4) + a6(6))
+           ! 2.0_dp*(Spin(1)*(A4(9)-A4(7)) + Spin(2)*A4(4) - Spin(3)*a4(5))&
+           LoadAtIP = 4.0_dp * (spin(1) * a4(9) - spin(3) * a4(5))&
+                       -2.0_dp*SD(4)*(A4(9)+a4(7)-4.0_dp*a6(10))&
+                       -2.0_dp*SD(5)*(a4(4)-4.0_dp*a6(11))&
+                       -2.0_dp*SD(6)*(a4(5)-4.0_dp*a6(10))&
+                       +4.0_dp*SD(1) * a6(4)&
+                       +4.0_dp*SD(2) * a6(6)&
+                       -4.0_dp*SD(3) *(a6(4) + a6(6))
          CASE(9)
            ! A4_4=a4_1123
-           LoadAtIP = (Spin(1)*A4(5) - Spin(2)*A4(3) - Spin(3)*(E1-2.0_dp*A4(1)-A4(3)))&
-                       -SD(4) * (A4(5) - 4.0_dp * a6(10))&
-                       -SD(5) * (-3.0_dp * a4(3) + 4.0_dp * a6(4) + 4.0_dp * a6(6))&
-                       -SD(6)*(E1-a4(9) - 4.0_dp*(a4(7)-a6(3)-a6(5)))&
-                       +2.0_dp * SD(1) * a6(9)& 
-                       +2.0_dp * SD(2) * a6(11)& 
-                       +2.0_dp * SD(3) * (a6(9) + a6(11)) 
+           LoadAtIP = 2.0_dp*(Spin(1)*A4(5) - Spin(2)*A4(3) - Spin(3)*(E1-2.0_dp*A4(1)-A4(3)))&
+                       -2.0_dp*SD(4) * (A4(5) - 4.0_dp * a6(10))&
+                       -2.0_dp*SD(5) * (-3.0_dp * a4(3) + 4.0_dp * a6(4) + 4.0_dp * a6(6))&
+                       -2.0_dp*SD(6)*(E1-a4(9) - 4.0_dp*(a4(7)-a6(3)-a6(5)))&
+                       -4.0_dp * (SD(3) - SD(1)) * a6(9)& 
+                       -4.0_dp * (SD(3) - SD(2)) * a6(11)
          CASE(10)
            ! A4_5=a4_1223
-           LoadAtIP = (Spin(1)*A4(8) - Spin(2)*A4(9) - Spin(3)*(E1-2.0_dp*A4(3)-A4(2)))&
-                       -SD(4) * (a4(8) - 4.0_dp * a6(11))&
-                       -SD(5) * (-3.0_dp * a4(9) + 4.0_dp * a6(5) + 4.0_dp * a6(7))&
-                       -SD(6)*(A2-a4(2) - 4.0_dp*(a4(3)-a6(4)-a6(6)))&
-                       +2.0_dp * SD(1) * a6(10)& 
-                       +2.0_dp * SD(2) * a6(12)& 
-                       +2.0_dp * SD(3) * (a6(10) + a6(12)) 
+           LoadAtIP = 2.0_dp*(Spin(1)*A4(8) - Spin(2)*A4(9) - Spin(3)*(A2-2.0_dp*A4(3)-A4(2)))&
+                       -2.0_dp*SD(4) * (a4(8) - 4.0_dp * a6(11))&
+                       -2.0_dp*SD(5) * (-3.0_dp * a4(9) + 4.0_dp * a6(5) + 4.0_dp * a6(7))&
+                       -2.0_dp*SD(6)*(A2-a4(2) - 4.0_dp*(a4(3)-a6(4)-a6(6)))&
+                       -4.0_dp * (SD(3) - SD(1)) * a6(10)& 
+                       -4.0_dp * (SD(3) - SD(2))* a6(12)
          CASE(11)
            ! A4_6=a4_1113
-           LoadAtIP = (Spin(1)*A4(4) - Spin(2)*A4(7) - Spin(3)*(A1-2.0_dp*A4(1)-A4(3)))&
-                       -SD(4) * (a4(4) + a4(1) - 4.0_dp * a6(9))&
-                       -SD(5) * (-3.0_dp * a4(7) + 4.0_dp * a6(3) + 4.0_dp * a6(5))&
-                       -SD(6)*(A1-5.0_dp * a4(1) - a4(3)+ 4.0_dp * a6(1) + 4.0_dp * a6(4))&
-                       -2.0_dp * (SD(3) - SD(1)) * a6(8)&
-                       -2.0_dp * (SD(3) - SD(2)) * a6(10)
+           LoadAtIP = 2.0_dp*(Spin(1)*A4(4) - Spin(2)*A4(7) - Spin(3)*(A1-2.0_dp*A4(1)-A4(3)))&
+                       -2.0_dp*SD(4) * (a4(4) - 4.0_dp * a6(9))&
+                       -2.0_dp*SD(5) * (-3.0_dp * a4(7) + 4.0_dp * a6(3) + 4.0_dp * a6(5))&
+                       -2.0_dp*SD(6)*(A1-4.0_dp * a4(1) - a4(3)+ 4.0_dp * a6(1) + 4.0_dp * a6(4))&
+                       -4.0_dp * (SD(3) - SD(1)) * a6(8)&
+                       -4.0_dp * (SD(3) - SD(2)) * a6(10)
          CASE(12)
            ! A4_7=a4_1112
-           LoadAtIP = (Spin(1)*(A4(3)-A4(1)) - Spin(2)*A4(6) - Spin(3)*a4(4))&
-                        -SD(4) *(A4(3) + A4(2) - 4.0_dp*a6(4))&
-                        -SD(5)*(a4(6)-4.0_dp*a6(11))&
-                        -SD(6) * (a4(4)-4.0_dp*a6(9))&
-                        -2.0_dp * (SD(3) - SD(1)) * a6(3)&
-                        -2.0_dp * (SD(3) - SD(2)) * a6(5)
+           LoadAtIP = 2.0_dp*(Spin(1)*(A4(3)-A4(1)) - Spin(2)*A4(6) - Spin(3)*a4(4))&
+                        -2.0_dp*SD(4) *(A4(3) + A4(2) - 4.0_dp*a6(4))&
+                        -2.0_dp*SD(5)*(a4(6)-4.0_dp*a6(11))&
+                        -2.0_dp*SD(6) * (a4(4)-4.0_dp*a6(9))&
+                        -4.0_dp * (SD(3) - SD(1)) * a6(3)&
+                        -4.0_dp * (SD(3) - SD(2)) * a6(5)
          CASE(13)
            ! A4_8=a4_2223
-           LoadAtIP = (-Spin(1)*A4(5) - Spin(2)*(A4(2)+A4(3)) + Spin(3)*A4(9))&
-                      -SD(4) * (a4(3) + a4(9) - 4.0_dp * a6(12))&
-                      -SD(5) * (-3.0_dp * a4(2) + 4.0_dp * a6(2) + 4.0_dp * a6(6))&
-                      -SD(6)*(A2-5.0_dp * a4(2) - a4(3)+ 4.0_dp*(a4(9) - a6(5) - a6(7)))&
-                      -2.0_dp * (SD(3) - SD(1)) * a6(11)&
-                      -2.0_dp * (SD(3) - SD(2)) * a6(13)
+           LoadAtIP = 2.0_dp*(-Spin(1)*A4(5) + Spin(2)*(A2 - 2.0_dp*A4(2) - A4(3)) + Spin(3)*A4(9))&
+                      -2.0_dp*SD(4) * (a4(5) - 4.0_dp * a6(12))&
+                      -2.0_dp*SD(5) * (A2 - a4(3) - 4.0_dp * a4(2) + 4.0_dp * a6(2) + 4.0_dp * a6(6))&
+                      -2.0_dp*SD(6)*(-3.0_dp*a4(9) + 4.0_dp * a6(5) + 4.0_dp * a6(7))&
+                      -4.0_dp*(SD(3) - SD(1)) * a6(11)&
+                      -4.0_dp*(SD(3) - SD(2)) * a6(13)
          CASE(14)
            ! A4_9=a4_1222
-           LoadAtIP = (Spin(1)*(A4(2)-A4(3)) - Spin(2)*A4(5) - Spin(3)*a4(8))&
-                       -SD(4) *(A4(2) + A4(3) - 4.0_dp*a6(6))&
-                       -SD(5)*(a4(5)-4.0_dp*a6(12))&
-                       -SD(6) * (a4(8)-4.0_dp*a6(11))&
-                       -2.0_dp * (SD(3) - SD(1)) * a6(5)&
-                       -2.0_dp * (SD(3) - SD(2)) * a6(7)
+           LoadAtIP = 2.0_dp*(Spin(1)*(A4(2)-A4(3)) + Spin(2)*A4(5) - Spin(3)*a4(8))&
+                       -2.0_dp*SD(4)*(A4(2) + A4(3) - 4.0_dp*a6(6))&
+                       -2.0_dp*SD(5)*(a4(5)-4.0_dp*a6(12))&
+                       -2.0_dp*SD(6)*(a4(8)-4.0_dp*a6(11))&
+                       -4.0_dp * (SD(3) - SD(1)) * a6(5)&
+                       -4.0_dp * (SD(3) - SD(2)) * a6(7)
          END SELECT
+      END SUBROUTINE RHS
 
-          IF (Wn(8).GT.0.0_dp) THEN
-              ! Normalization issue means the / 3.0 is needed
-              da2dt_mig = da2dt_DRX_elmer(Stress, a2short, a4)
-              LoadAtIp= LoadAtIp + Wn(8) * da2dt_mig(COMP)
-          END IF
-
-
-        If (Fond) LoadAtIp=0._dp
-        LoadAtIp= LoadAtIp * Basis(p)
-        FORCE(p) = FORCE(p) + s*LoadAtIp
-      END DO
-
-              
-      END DO 
-
- 1000 FORMAT((a),x,i2,x,6(e13.5,x)) 
- 1001 FORMAT(6(e13.5,x))
-!------------------------------------------------------------------------------
-       END SUBROUTINE LocalMatrix
-!------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
     SUBROUTINE FindParentUVW( Edge, nEdge, Parent, nParent, U, V, W, Basis )
