@@ -87,7 +87,7 @@
 
      TYPE(Variable_t), POINTER :: FabricSol, TempSol, FabricVariable, FlowVariable, &
                                   EigenFabricVariable,MeshVeloVariable,&
-                                  OOPlaneRotSol13, OOPlaneRotSol23
+                                  OOPlaneRotSol13,OOPlaneRotSol23,GradSol
 
      REAL(KIND=dp), POINTER :: Temperature(:),Fabric(:), &
            FabricValues(:), FlowValues(:), EigenFabricValues(:), &
@@ -97,7 +97,7 @@
 
      INTEGER, POINTER :: TempPerm(:),FabricPerm(:),NodeIndexes(:), &
                         FlowPerm(:),MeshVeloPerm(:),EigenFabricPerm(:),&
-                        OOPlaneRotPerm13(:), OOPlaneRotPerm23(:)
+                        OOPlaneRotPerm13(:),OOPlaneRotPerm23(:),GradPerm(:)
 
      REAL(KIND=dp) :: rho,lambda   !Interaction parameter,diffusion parameter
      REAL(KIND=dp) :: A1plusA2
@@ -113,7 +113,7 @@
 !
      INTEGER :: old_body = -1
 
-     REAL(KIND=dp) :: FabricGrid(4879)                   
+     REAL(KIND=dp) :: FabricGrid(4879)
                         
      LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE., FreeSurface
 
@@ -123,13 +123,13 @@
        LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
        Alpha(:,:),Beta(:), K1(:), K2(:), E1(:), E2(:), E3(:), &
        Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:), &
-       LocalA4(:,:)
+       LocalA4(:,:),ElGradVals(:,:,:),LocalGrad(:, :)
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, K1, K2, &
           E1, E2, E3, LocalA4, Wn,  FabricGrid, rho, lambda, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
-          spoofdim, FabVarName, FirstTime
+          spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad
 !------------------------------------------------------------------------------
      CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
      OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
@@ -181,7 +181,6 @@
           WRITE(Message,'(A,A)') 'Fabric name unfound, using ', FabVarName
           CALL INFO('FabricSolveRecryst', Message , level = 3)
       END IF
-
       FabricSol    => VariableGet( Solver % Mesh % Variables, FabVarName )
       IF ( ASSOCIATED( FabricSol) ) THEN
         FabricPerm   => FabricSol % Perm
@@ -278,6 +277,8 @@
        IF ( AllocationsDone ) THEN
          DEALLOCATE( LocalTemperature, &
                      K1,K2,E1,E2,E3,LocalA4, &
+                     ElGradVals, &
+                     LocalGrad,&
                      Force, LocalFluidity, &
                      Velocity,MeshVelocity, &
                      MASS,STIFF,      &
@@ -288,7 +289,9 @@
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
                  K1( N ), K2( N ), E1( N ), E2( N ), E3( N ), &
-                 LocalA4(9, N), &
+                 LocalA4(9, N),&
+                 ElGradVals(Solver % NumberOFActiveElements, 14,N), &
+                 LocalGrad(14,N), &
                  Force( 2*STDOFs*N ), &
                  Velocity(4, N ),MeshVelocity(3,N), &
                  MASS( 2*STDOFs*N,2*STDOFs*N ),  &
@@ -382,6 +385,72 @@
 !------------------------------------------------------------------------------
 
        PrevUNorm = UNorm
+
+       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+       !! Calculate and save gradients once per iteration
+       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+       DO t=1,Solver % NumberOFActiveElements
+         CurrentElement => GetActiveElement(t)
+         CALL GetElementNodes( ElementNodes )
+         n = GetElementDOFs( Indexes )
+         n = GetElementNOFNodes()
+         NodeIndexes => CurrentElement % NodeIndexes
+         Material => GetMaterial()
+         body_id = CurrentElement % BodyId
+         IF (body_id /= old_body) Then 
+           old_body = body_id
+           CALL GetMaterialDefs()
+         END IF
+         LocalFluidity(1:n) = ListGetReal( Material, &
+                         'Fluidity Parameter', n, NodeIndexes, GotIt,&
+                         UnFoundFatal=UnFoundFatal)
+!------------------------------------------------------------------------------
+!        Get element local stiffness & mass matrices
+!------------------------------------------------------------------------------
+         LocalTemperature = 0.0D0
+         IF ( ASSOCIATED(TempSol) ) THEN
+            DO i=1,n
+               k = TempPerm(NodeIndexes(i))
+               LocalTemperature(i) = Temperature(k)
+            END DO
+         ELSE
+            LocalTemperature(1:n) = 0.0d0
+         END IF
+
+         K1(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+1 )
+         K2(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+2 )
+         E1(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+3 )
+         E2(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+4 )
+         E3(1:n) = CurrFabric( 14*(Solver % Variable % Perm(Indexes(1:n))-1)+5 )
+         DO i = 1,9
+            LocalA4(i, 1:n) = CurrFabric( 14*(Solver % Variable %Perm(Indexes(1:n))-1)+i+5 )
+         END DO
+
+         ! Two variables needed for velocity
+         k = FlowVariable % DOFs
+         Velocity = 0.0d0
+         DO i=1,k-1
+            Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
+         END DO
+         MeshVelocity=0._dp
+         IF (ASSOCIATED(MeshVeloVariable)) Then
+           k = MeshVeloVariable % DOFs
+           DO i=1,k
+              MeshVelocity(i,1:n) = MeshVeloValues(k*(MeshVeloPerm(NodeIndexes)-1)+i)
+           END DO
+         EndIF
+
+         LocalOOP13 = 0.0_dp
+         LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
+         LocalOOP23 = 0.0_dp
+         LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
+         CALL FabGrad(LocalGrad,&
+           K1,K2,E1,E2,E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
+           MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
+           LocalOOP23, LocalOOP13)
+         ElGradVals(t, :, :) = LocalGrad(:, :)
+       END DO  ! active elements
+ 
        
        DO COMP=1,14
 
@@ -463,26 +532,24 @@
          EndIF
 !----------------------------------
 
-          If ( OOPlaneRot23 .AND. OOPlaneRot13 ) THEN
+        LocalGrad(:, :) = ElGradVals(t, :, :)
+        If ( OOPlaneRot23 .AND. OOPlaneRot13 ) THEN
              LocalOOP13 = 0.0_dp
              LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
              LocalOOP23 = 0.0_dp
              LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
-             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
-               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
+             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, LocalGrad,Velocity, &
+               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, &
                LocalOOP23, LocalOOP13)
          Else If ( OOPlaneRot23 ) THEN
              LocalOOP23 = 0.0_dp
              LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
-             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
-               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
+             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, LocalGrad, Velocity, &
+               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, &
                LocalOOP23)
          ELSE
-             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, K1, K2, E1, &
-               E2, E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
-               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda )
+             CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, LocalGrad, Velocity, &
+               MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho )
          END IF
 
 !------------------------------------------------------------------------------
@@ -681,16 +748,16 @@
       CASE(2)
        FabricValues( COMP:SIZE(FabricValues):14 ) = &
        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),1._dp)
-      ! CASE(6)
-      !  FabricValues( COMP:SIZE(FabricValues):14 ) = &
-      !  MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 1:SIZE(FabricValues):14 ))
-      ! CASE(7)
-      !  FabricValues( COMP:SIZE(FabricValues):14 ) = &
-      !  MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 2:SIZE(FabricValues):14 ))
+      CASE(6)
+        FabricValues( COMP:SIZE(FabricValues):14 ) = &
+        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 1:SIZE(FabricValues):14 ))
+      CASE(7)
+        FabricValues( COMP:SIZE(FabricValues):14 ) = &
+        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 2:SIZE(FabricValues):14 ))
 
-      ! CASE(8)
-      !  FabricValues( COMP:SIZE(FabricValues):14 ) = &
-      !  MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 1:SIZE(FabricValues):14 ))
+      CASE(8)
+        FabricValues( COMP:SIZE(FabricValues):14 ) = &
+        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):14 ) , 0._dp),FabricValues( 1:SIZE(FabricValues):14 ))
       END SELECT
 
       END DO ! End DO Comp
@@ -856,27 +923,24 @@ CONTAINS
       END SUBROUTINE GetMaterialDefs
 !------------------------------------------------------------------------------
 
-
-!------------------------------------------------------------------------------
-      SUBROUTINE LocalMatrix( Comp, MASS, STIFF, FORCE, LOAD, &
+      SUBROUTINE FabGrad( Gradient, &
           NodalK1, NodalK2, NodalEuler1, NodalEuler2, NodalEuler3, & 
           NodalA4, &
           NodalTemperature, NodalFluidity, NodalVelo, NodMeshVel, &
           Element, n, Nodes, Wn, rho,lambda,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
-
-     REAL(KIND=dp) :: STIFF(:,:),MASS(:,:)
-     REAL(KIND=dp) :: LOAD(:,:),NodalVelo(:,:),NodMeshVel(:,:),NodalA4(:,:)
-     REAL(KIND=dp), DIMENSION(:) :: FORCE, NodalK1, NodalK2, NodalEuler1, &
+     REAL(KIND=dp) :: NodalVelo(:,:),NodMeshVel(:,:),NodalA4(:,:)
+     REAL(KIND=dp), DIMENSION(:) :: NodalK1, NodalK2, NodalEuler1, &
                NodalEuler2, NodalEuler3, NodalTemperature, NodalFluidity
      REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
+     REAL(KIND=dp), Intent(OUT) :: Gradient(:,:)
 
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t) :: Element
      INTEGER :: n, Comp
 !------------------------------------------------------------------------------
 !
-     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
+     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1),NodalGradient(14)
      REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
 
      REAL(KIND=dp) :: A1, A2, A3, E1, E2, E3, Theta
@@ -884,8 +948,7 @@ CONTAINS
 
      REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
-     REAL(KIND=dp) :: rho,lambda,Deq,ai(6),a4(9),hmax,a2short(5),da2dt_mig(5)
-     REAL(KIND=dp) :: a6(13), a6c(13)
+     REAL(KIND=dp) :: rho,lambda,Deq2,Deq4,ai(6),a4(9),hmax,a2short(5)
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
@@ -896,12 +959,6 @@ CONTAINS
      REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3)
      REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS
      Integer :: INDi(6),INDj(6)
-     LOGICAL :: CSymmetry
-     INTEGER, PARAMETER :: LCap=4
-     
-     LOGICAL :: Fond
-              
-!              
      INTEGER :: N_Integ
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
 
@@ -913,20 +970,7 @@ CONTAINS
            USE Types
            REAL(KIND=dp) :: BGlenT,Tc,W(8)
         END FUNCTION
-        
-        SUBROUTINE IBOF(ai,a4)
-           USE Types
-           REAL(KIND=dp),intent(in) :: ai(6)
-           REAL(KIND=dp),intent(out) :: a4(9)
-        END SUBROUTINE
-
-        SUBROUTINE LinA6C(ai,a4,a6)
-           USE Types
-           REAL(KIND=dp),intent(in) :: ai(6), a4(9)
-           REAL(KIND=dp),intent(out) :: a6(13)
-        END SUBROUTINE
-
-        Subroutine R2Ro(ai,dim,spoofdim,a2,angle)
+         Subroutine R2Ro(ai,dim,spoofdim,a2,angle)
          USE Types
          REAL(KIND=dp),intent(in) :: ai(6)
          Integer :: dim, spoofdim
@@ -941,18 +985,10 @@ CONTAINS
           REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
         END SUBROUTINE OPILGGE_ai_nl
         
-        !FUNCTION  da2dt_DRX_elmer(tau, a2, a4)
-        !  real(kind=8), intent(in) :: tau(3,3), a2(5), a4(9)
-        !  real(kind=8) :: da2dt_DRX_mat(3,3)
-        !  real(kind=8) :: da2dt_DRX_elmer(5)
-        !END FUNCTION da2dt_DRX_elmer
       END INTERFACE
-!------------------------------------------------------------------------------
-      Fond=.False.
-      
       hmax = maxval (Nodes % y(1:n))
         
-     dim = CoordinateSystemDimension()
+      dim = CoordinateSystemDimension()
 
       ! Check if we are bumping up the problem dimension
       IF (( PRESENT(LocalOOP13) ).OR.( PRESENT(LocalOOP23))) THEN
@@ -961,10 +997,8 @@ CONTAINS
           SpoofDim = dim
       END IF
 
-      FORCE = 0.0D0
-      MASS  = 0.0D0
-      STIFF = 0.0D0
-!    
+
+
 !    Integration stuff:
 !    ------------------
       NBasis = n
@@ -1015,11 +1049,7 @@ CONTAINS
       DO i=1,9
        a4(i) = SUM(NodalA4(i,1:n)*Basis(1:n))
       END DO
-
-
-
       Theta = 1._dp / ( FabricGrid(5) + FabricGrid(6) )
-      CSymmetry = CurrentCoordinateSystem() == AxisSymmetric
       
       Stress = 0.0
       StrainRate = 0.0
@@ -1027,8 +1057,6 @@ CONTAINS
 !
 !    Material parameters at that point
 !    ---------------------------------
-!
-      ! for recryst
       a2short(1)=A1
       a2short(2)=A2
       a2short(3)=E1
@@ -1036,49 +1064,15 @@ CONTAINS
       a2short(5)=E3
       call R2Ro(ai,dim,spoofdim,ap,angle)
       CALL OPILGGE_ai_nl(ap, Angle, FabricGrid, C)
-
-      !!!!!!!!!!!!!!!!!!!!
-      ! Closure
-      !!!!!!!!!!!!!!!!!!!!
-      ! CALL LinA6C(ai, a4, a6)
-
-      a6 = a6_CBT_elmer(a2short, a4)
-
-!    Compute strainRate and Spin :
-!    -----------------------------
-
       LGrad = MATMUL( NodalVelo(1:3,1:n), dBasisdx(1:n,1:3) )
 
       StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
 
       Spin1 = 0.5 * ( LGrad - TRANSPOSE(LGrad) )
-
-      IF ( CSymmetry ) THEN
-        StrainRate(1,3) = 0.0
-        StrainRate(2,3) = 0.0
-        StrainRate(3,1) = 0.0
-        StrainRate(3,2) = 0.0
-        StrainRate(3,3) = 0.0
-
-        Radius = SUM( Nodes % x(1:n) * Basis(1:n) )
-
-        IF ( Radius > 10*AEPS ) THEN
-         StrainRate(3,3) = SUM( Nodalvelo(1,1:n) * Basis(1:n) ) / Radius
-        END IF
-
-        epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
-        DO i=1,3   
-          StrainRate(i,i) = StrainRate(i,i) - epsi/3.0
-        END DO
-
-      ELSE
-        epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
+      epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
         DO i=1,dim 
           StrainRate(i,i) = StrainRate(i,i) - epsi/dim
         END DO
-
-      END IF
-
 
       ! If we are adding in manual spins, do it here before the stress
       ! calculations
@@ -1133,27 +1127,146 @@ CONTAINS
         SD(i)= (1._dp - rho)*StrainRate(INDi(i),INDj(i)) + rho *&
                                    Theta *  Stress(INDi(i),INDj(i))
       END DO
-      DO i=1,2*spoofdim-3
-        Spin(i)=Spin1(INDi(i+3),INDj(i+3))
-      End do
 
-      ! Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
-      !                        (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
-      ! write(*,*) Deq
-      ! Deq = Deq * Lambda
-      Deq = Lambda
+      Deq2 = Lambda
+      Deq4 = Lambda
 
+      CALL daidt_COMB_elmer(SD, Stress, Spin1, a2short, a4, &
+                            Wn(9), Deq2, Deq4, Wn(8), NodalGradient)
+      Gradient(:, t) = NodalGradient(:)
+      END DO ! N_Integ
+       END SUBROUTINE FabGrad
+
+
+
+!------------------------------------------------------------------------------
+      SUBROUTINE LocalMatrix( Comp, MASS, STIFF, FORCE, LOAD, &
+          Grad, NodalVelo, NodMeshVel, &
+          Element, n, Nodes, Wn, rho, LocalOOP23,LocalOOP13)
+!------------------------------------------------------------------------------
+
+     REAL(KIND=dp) :: STIFF(:,:),MASS(:,:)
+     REAL(KIND=dp) :: LOAD(:,:),NodalVelo(:,:),NodMeshVel(:,:),Grad(:,:)
+     REAL(KIND=dp), DIMENSION(:) :: FORCE
+     REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
+
+     TYPE(Nodes_t) :: Nodes
+     TYPE(Element_t) :: Element
+     INTEGER :: n, Comp
+!------------------------------------------------------------------------------
+!
+
+     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
+     REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
+
+     REAL(KIND=dp) :: OOP23
+
+     REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
+     REAL(KIND=dp) :: LoadAtIp, Temperature
+     REAL(KIND=dp) :: rho,hmax
+
+     INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
+
+     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), C44,C55,C66
+     REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
+     
+     INTEGER :: N_Integ
+     REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
+
+     LOGICAL :: stat
+     TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
+
+     INTERFACE
+        FUNCTION BGlenT( Tc, W)
+           USE Types
+           REAL(KIND=dp) :: BGlenT,Tc,W(8)
+        END FUNCTION
+        
+        SUBROUTINE IBOF(ai,a4)
+           USE Types
+           REAL(KIND=dp),intent(in) :: ai(6)
+           REAL(KIND=dp),intent(out) :: a4(9)
+        END SUBROUTINE
+
+        SUBROUTINE LinA6C(ai,a4,a6)
+           USE Types
+           REAL(KIND=dp),intent(in) :: ai(6), a4(9)
+           REAL(KIND=dp),intent(out) :: a6(13)
+        END SUBROUTINE
+
+        Subroutine R2Ro(ai,dim,spoofdim,a2,angle)
+         USE Types
+         REAL(KIND=dp),intent(in) :: ai(6)
+         Integer :: dim, spoofdim
+         REAL(KIND=dp),intent(out) :: a2(3), Angle(3)
+        End Subroutine R2Ro
+
+        Subroutine OPILGGE_ai_nl(a2,Angle,etaI,eta36)
+          USE Types
+          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: a2
+          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: Angle
+          REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
+          REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
+        END SUBROUTINE OPILGGE_ai_nl
+        
+        !FUNCTION  da2dt_DRX_elmer(tau, a2, a4)
+        !  real(kind=8), intent(in) :: tau(3,3), a2(5), a4(9)
+        !  real(kind=8) :: da2dt_DRX_mat(3,3)
+        !  real(kind=8) :: da2dt_DRX_elmer(5)
+        !END FUNCTION da2dt_DRX_elmer
+      END INTERFACE
+!------------------------------------------------------------------------------
+      hmax = maxval (Nodes % y(1:n))
+        
+     dim = CoordinateSystemDimension()
+
+      ! Check if we are bumping up the problem dimension
+      IF (( PRESENT(LocalOOP13) ).OR.( PRESENT(LocalOOP23))) THEN
+          SpoofDim = dim + 1
+      ELSE
+          SpoofDim = dim
+      END IF
+
+      FORCE = 0.0D0
+      MASS  = 0.0D0
+      STIFF = 0.0D0
+!    
+!    Integration stuff:
+!    ------------------
+      NBasis = n
+      IntegStuff = GaussPoints( Element  )
+
+      U_Integ => IntegStuff % u
+      V_Integ => IntegStuff % v
+      W_Integ => IntegStuff % w
+      S_Integ => IntegStuff % s
+      N_Integ =  IntegStuff % n
+
+      hk = ElementDiameter( Element, Nodes )
+!
+!   Now we start integrating:
+!   -------------------------
+      DO t=1,N_Integ
+
+      u = U_Integ(t)
+      v = V_Integ(t)
+      w = W_Integ(t)
+
+!------------------------------------------------------------------------------
+!     Basis function values & derivatives at the integration point
+!------------------------------------------------------------------------------
+      stat = ElementInfo( Element,Nodes,u,v,w,SqrtElementMetric, &
+               Basis, dBasisdx, ddBasisddx, .FALSE. )
+
+      s = SqrtElementMetric * S_Integ(t)
       Velo = 0.0d0
       DO i=1,spoofdim
          Velo(i) = SUM( Basis(1:n) * (NodalVelo(i,1:n) - NodMeshVel(i,1:n)) )
       END DO
       Unorm = SQRT( SUM( Velo**2._dp ) )
 
-      If (Fond) C0=0._dp
-
       c0 = 0.0_dp
-      CALL daidt_COMB_elmer(COMP, SD, Stress, Spin1, a2short, a4, &
-                            Wn(9), Deq, Wn(8), LoadAtIp)
+      LoadAtIp = Grad(COMP, t)
       DO p=1,NBasis
          DO q=1,NBasis
             A = 0.0d0
@@ -1176,7 +1289,6 @@ CONTAINS
             STIFF( p,q ) = STIFF( p,q ) + s * A
          END DO
 
-        If (Fond) LoadAtIp=0._dp
         FORCE(p) = FORCE(p) + s*LoadAtIp*Basis(p)
       END DO
 
