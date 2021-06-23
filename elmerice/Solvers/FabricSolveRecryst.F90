@@ -80,7 +80,7 @@
               ParentElement, LeftParent, RightParent, Edge
 
      REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm,Gravity(3), &
-         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(9)
+         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(12)
 
 
      INTEGER :: NewtonIter,NonlinearIter
@@ -99,7 +99,7 @@
                         FlowPerm(:),MeshVeloPerm(:),EigenFabricPerm(:),&
                         OOPlaneRotPerm13(:),OOPlaneRotPerm23(:),GradPerm(:)
 
-     REAL(KIND=dp) :: rho,lambda   !Interaction parameter,diffusion parameter
+     REAL(KIND=dp) :: rho,lambda0,gamma0   !Interaction parameter,diffusion parameter
      REAL(KIND=dp) :: A1plusA2
      Real(KIND=dp), parameter :: Rad2deg=180._dp/Pi
      REAL(KIND=dp) :: a2(6)
@@ -127,9 +127,9 @@
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, K1, K2, &
-          E1, E2, E3, LocalA4, Wn,  FabricGrid, rho, lambda, Velocity, &
+          E1, E2, E3, LocalA4, Wn,  FabricGrid, rho, lambda0, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
-          spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad
+          spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad, gamma0
 !------------------------------------------------------------------------------
      CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
      OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
@@ -446,7 +446,7 @@
          LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
          CALL FabGrad(LocalGrad,&
            K1,K2,E1,E2,E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
-           MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda, &
+           MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda0, gamma0, &
            LocalOOP23, LocalOOP13)
          ElGradVals(t, :, :) = LocalGrad(:, :)
        END DO  ! active elements
@@ -865,9 +865,9 @@ CONTAINS
            CALL INFO('AIFlowSolve', Message, Level = 20)
        END IF
 
-       lambda = ListGetConstReal( Material, 'Diffusion Parameter', GotIt,UnFoundFatal=UnFoundFatal)
+       lambda0 = ListGetConstReal( Material, 'Diffusion Intercept', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: lambda = 0.0_dp
-      WRITE(Message,'(A,F10.4)') 'Diffusion Parameter = ', lambda
+      WRITE(Message,'(A,F10.4)') 'Diffusion Intercept = ', lambda0
       CALL INFO('AIFlowSolve', Message, Level = 20)
 
       Wn(2) = ListGetConstReal( Material , 'Powerlaw Exponent', GotIt,UnFoundFatal=UnFoundFatal)
@@ -896,12 +896,12 @@ CONTAINS
       CALL INFO('AIFlowSolve', Message, Level = 20)
 
 
-      Wn(8) = ListGetConstReal( Material, 'Migration Gamma', GotIt,UnFoundFatal=.FALSE.)
+      Wn(8) = ListGetConstReal( Material, 'Migration A', GotIt,UnFoundFatal=.FALSE.)
            !Previous default value: Wn(6) = -10.0
       IF (.NOT.GotIt) THEN
         Wn(8) = 0.0_dp
         WRITE(Message,'(A,F10.4)') &
-            'Migration Gamma unfound, taken to be ',   Wn(8)
+            'Migration A unfound, taken to be ',   Wn(8)
         CALL INFO('AIFlowSolve', Message, Level = 3)
       ELSE
         WRITE(Message,'(A,F10.4)') 'Migration Gamma = ',   Wn(8)
@@ -918,7 +918,29 @@ CONTAINS
         WRITE(Message,'(A,F10.4)') 'Lattice Rotation = ',   Wn(9)
         CALL INFO('AIFlowSolve', Message, Level = 20)
       END IF
-!------------
+
+      Wn(10) = ListGetConstReal( Material, 'Diffusion Temp Dependence', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(10) = 0.0_dp
+        WRITE(Message,'(A,F10.4)') &
+            'Diffusion temp dependence unfound, assumed zero'
+        CALL INFO('AIFlowSolve', Message, Level = 3)
+      END IF
+
+      Wn(11) = ListGetConstReal( Material, 'Max Diffusion', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(11) = 1.0e8_dp
+      END IF
+
+      Wn(12) = ListGetConstReal( Material, 'Max Migration', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(12) = 1.0e8_dp
+      END IF
+
+      gamma0 = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
+      WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gamma0
+      CALL INFO('AIFlowSolve', Message, Level = 20)
+
 !------------------------------------------------------------------------------
       END SUBROUTINE GetMaterialDefs
 !------------------------------------------------------------------------------
@@ -927,7 +949,7 @@ CONTAINS
           NodalK1, NodalK2, NodalEuler1, NodalEuler2, NodalEuler3, & 
           NodalA4, &
           NodalTemperature, NodalFluidity, NodalVelo, NodMeshVel, &
-          Element, n, Nodes, Wn, rho,lambda,LocalOOP23,LocalOOP13)
+          Element, n, Nodes, Wn, rho,lambda0,gamma0,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
      REAL(KIND=dp) :: NodalVelo(:,:),NodMeshVel(:,:),NodalA4(:,:)
      REAL(KIND=dp), DIMENSION(:) :: NodalK1, NodalK2, NodalEuler1, &
@@ -948,7 +970,8 @@ CONTAINS
 
      REAL(KIND=dp) :: A,M, hK,tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
-     REAL(KIND=dp) :: rho,lambda,Deq2,Deq4,ai(6),a4(9),hmax,a2short(5)
+     REAL(KIND=dp) :: rho,Deq,ai(6),a4(9),hmax,a2short(5)
+     REAL(KIND=dp) :: lambda0, gamma0, lambda, gammav
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
@@ -1046,6 +1069,8 @@ CONTAINS
       ai(5)=E2
       ai(6)=E3
 
+      Temperature = SUM( NodalTemperature(1:n) * Basis(1:n) ) 
+
       DO i=1,9
        a4(i) = SUM(NodalA4(i,1:n)*Basis(1:n))
       END DO
@@ -1127,12 +1152,16 @@ CONTAINS
         SD(i)= (1._dp - rho)*StrainRate(INDi(i),INDj(i)) + rho *&
                                    Theta *  Stress(INDi(i),INDj(i))
       END DO
+      Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
+                             (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
 
-      Deq2 = Lambda
-      Deq4 = Lambda
+      ! simplest to do this in celcius
+      lambda = MIN((lambda0 + Temperature * Wn(10)) * Deq, Wn(11))
+      ! Arrhenius relations are in Kelvin
+      gammav = Min((gamma0 * EXP(-Wn(8) / (Temperature + 273.15))) * Deq, Wn(12))
 
       CALL daidt_COMB_elmer(SD, Stress, Spin1, a2short, a4, &
-                            Wn(9), Deq2, Deq4, Wn(8), NodalGradient)
+                            Wn(9), lambda, lambda, gammav, NodalGradient)
       Gradient(:, t) = NodalGradient(:)
       END DO ! N_Integ
        END SUBROUTINE FabGrad
