@@ -72,7 +72,7 @@
      TYPE(Matrix_t),POINTER :: StiffMatrix
 
      INTEGER :: i, j, k, l, n, t, iter, NDeg, STDOFs, LocalNodes, istat
-     INTEGER :: dim, comp 
+     INTEGER :: dim, comp, FabDOFs
 
      TYPE(ValueList_t),POINTER :: Material, BC, BodyForce, SolverParams
      TYPE(Nodes_t) :: ElementNodes
@@ -160,7 +160,7 @@
        LocalForce, ElementNodes, Alpha, Beta, LocalTemperature, LocalFlowWidth, &
        Isotropic,AllocationsDone,ReferenceTemperature,BoundaryDispl, &
        NodalAIFlow, K1, K2, E1, E2, E3, Wn, MinSRInvariant, old_body, &
-       LocalFluidity
+       LocalFluidity, FabDOFs
 
      SAVE RefD, RefS, RefSpin, LocalVelo, SlipCoeff
 !------------------------------------------------------------------------------
@@ -204,6 +204,7 @@
 
       FabricVariable => VariableGet(Solver % Mesh % Variables, 'Fabric')
       IF ( ASSOCIATED( FabricVariable ) ) THEN
+       FabDOFs = FabricVariable % DOFs
        FabricPerm    => FabricVariable % Perm
        FabricValues => FabricVariable % Values
       END IF
@@ -416,11 +417,11 @@
 
 ! fabric not needed if isotropic
          IF(.NOT.Isotropic) THEN
-           K1(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 1 )
-           K2(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 2 )
-           E1(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 3 )
-           E2(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 4 )
-           E3(1:n) = FabricValues( 5 * (FabricPerm(NodeIndexes(1:n))-1) + 5 )
+           K1(1:n) = FabricValues( FabDOFs * (FabricPerm(NodeIndexes(1:n))-1) + 1 )
+           K2(1:n) = FabricValues( FabDOFs * (FabricPerm(NodeIndexes(1:n))-1) + 2 )
+           E1(1:n) = FabricValues( FabDOFs * (FabricPerm(NodeIndexes(1:n))-1) + 3 )
+           E2(1:n) = FabricValues( FabDOFs * (FabricPerm(NodeIndexes(1:n))-1) + 4 )
+           E3(1:n) = FabricValues( FabDOFs * (FabricPerm(NodeIndexes(1:n))-1) + 5 )
          ENDIF
 
          LocalVelo = 0.0d0
