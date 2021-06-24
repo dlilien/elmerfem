@@ -441,9 +441,11 @@
          EndIF
 
          LocalOOP13 = 0.0_dp
-         LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
          LocalOOP23 = 0.0_dp
-         LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
+         IF (spoofdim.gt.dim) THEN
+            LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
+            LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
+        END IF
          CALL FabGrad(LocalGrad,&
            K1,K2,E1,E2,E3,LocalA4, LocalTemperature, LocalFluidity,  Velocity, &
            MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda0, gamma0, &
@@ -453,6 +455,8 @@
  
        
        DO COMP=1,14
+         ! We can ignore components with a 3 index if dim is low
+         IF ((spoofdim.le.2).AND.( ANY((/ 4, 5, 9, 10, 11, 13 /) == COMP))) CYCLE
 
        Solver % Variable % Values = CurrFabric( COMP::14 )
        IF ( TransientSimulation ) THEN
