@@ -139,7 +139,7 @@
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
 
-     INTEGER, PARAMETER :: LCap=4, fab_len=15
+     INTEGER, PARAMETER :: LCap=6, fab_len=28
 
      SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal
 #ifdef USE_ISO_C_BINDINGS
@@ -440,7 +440,7 @@
             LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
             LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
         END IF
-         CALL FabGrad( LocalGrad, LocalLHS, LocalFabric, &
+         CALL FabGrad( LocalGrad, LocalLHS, fab_len, LocalFabric, &
                        LocalTemperature, LocalFluidity,  Velocity, &
                        MeshVelocity, CurrentElement, n, ElementNodes, &
                        Wn, rho, lambda0, gamma0, LocalOOP23, LocalOOP13)
@@ -848,10 +848,12 @@ CONTAINS
       END SUBROUTINE GetMaterialDefs
 !------------------------------------------------------------------------------
 
-      SUBROUTINE FabGrad( Gradient, LHS, NodalFabric, &
-          NodalTemperature, NodalFluidity, NodalVelo, NodMeshVel, &
-          Element, n, Nodes, Wn, rho,lambda0,gamma0,LocalOOP23,LocalOOP13)
+      SUBROUTINE FabGrad( Gradient, LHS, fab_len, NodalFabric, &
+                          NodalTemperature, NodalFluidity, NodalVelo, &
+                          NodMeshVel, Element, n, Nodes, Wn, rho, &
+                          lambda0,gamma0,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
+     INTEGER :: fab_len
      REAL(KIND=dp) :: NodalVelo(:,:),NodMeshVel(:,:),NodalFabric(:,:)
      REAL(KIND=dp), DIMENSION(:) :: NodalTemperature, NodalFluidity
      REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
@@ -875,12 +877,14 @@ CONTAINS
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
-     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), C44,C55,C66
+     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), a2full(3, 3)
      REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
 
      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
-     REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3)
+     REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3),eps(3,3)
      REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS, Fabric(fab_len)
+     REAL(KIND=dp) :: dndt(fab_len, fab_len), dndt_ROT(fab_len, fab_len),&
+                      dndt_DDRX(fab_len, fab_len), dndt_CDRX(fab_len, fab_len)
      Integer :: INDi(6),INDj(6)
      INTEGER :: N_Integ
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
@@ -958,13 +962,18 @@ CONTAINS
       Stress = 0.0
       StrainRate = 0.0
       Spin1 = 0.0
+
+      a2full = a2_ij(CMPLX(Fabric, KIND=dp))
 !
 !    Material parameters at that point
 !    ---------------------------------
-      ai(1) = Fabric(1)
-      ai(2) = Fabric(2)
-      ai(3) = 1.0_dp - ai(1) - ai(2)
-      ai(4:6) = Fabric(3:5)
+      ai(1) = a2full(1, 1)
+      ai(2) = a2full(2, 2)
+      ai(3) = a2full(3, 3)
+      ai(4) = a2full(1, 2)
+      ai(5) = a2full(2, 3)
+      ai(6) = a2full(1, 3)
+
       call R2Ro(ai,dim,spoofdim,ap,angle)
       CALL OPILGGE_ai_nl(ap, Angle, FabricGrid, C)
       LGrad = MATMUL( NodalVelo(1:3,1:n), dBasisdx(1:n,1:3) )
@@ -1030,6 +1039,16 @@ CONTAINS
         SD(i)= (1._dp - rho)*StrainRate(INDi(i),INDj(i)) + rho *&
                                    Theta *  Stress(INDi(i),INDj(i))
       END DO
+      eps(1, 1) = SD(1)
+      eps(1, 2) = SD(4)
+      eps(1, 3) = SD(6)
+      eps(2, 1) = SD(4)
+      eps(2, 2) = SD(2)
+      eps(2, 3) = SD(5)
+      eps(3, 1) = SD(6)
+      eps(3, 2) = SD(5)
+      eps(3, 3) = SD(3)
+    
       Deq=sqrt((SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
                              (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
 
@@ -1038,9 +1057,17 @@ CONTAINS
       ! Arrhenius relations are in Kelvin
       gammav = Min((gamma0 * EXP(-Wn(8) / (Temperature + 273.15))) * Deq, Wn(12))
 
-      CALL daidt_COMB_elmer(SD, Stress, Spin1, Fabric(1:5), Fabric(6:14), &
-                            Wn(9), lambda, lambda, gammav, NodalGradient)
-      Gradient(:, t) = NodalGradient(:)
+      dndt_ROT = dndt_ij_LATROT(EPS, Spin1, 0.0_dp * Strainrate,&
+                                0.0_dp, 0.0_dp, 0.0_dp, 1.0_dp)
+      dndt_DDRX = dndt_ij_DDRX(CMPLX(Fabric, kind=dp), EPS)
+      dndt_CDRX = f_nu_eps(lambda, StrainRate) * dndt_ij_REG()
+
+      dndt = gammav * dndt_DDRX + dndt_CDRX + Wn(9) * dndt_ROT
+      NodalGradient = REAL(MATMUL(dndt, Fabric))
+      DO i=1,fab_len
+        Gradient(i, t) = NodalGradient(i) - REAL(dndt(i, i) * Fabric(i))
+        LHS(i, t) = REAL(dndt(i, i) * Fabric(i))
+      END DO
       END DO ! N_Integ
        END SUBROUTINE FabGrad
 
@@ -1105,7 +1132,7 @@ CONTAINS
         END DO
         Unorm = SQRT( SUM( Velo**2._dp ) )
 
-        c0 = 0.0_dp
+        c0 = LHS(COMP, t)
         LoadAtIp = Grad(COMP, t)
         DO p=1,NBasis
           DO q=1,NBasis
