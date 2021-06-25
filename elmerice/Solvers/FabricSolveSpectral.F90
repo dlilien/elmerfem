@@ -86,17 +86,17 @@
      INTEGER :: NewtonIter,NonlinearIter
 
      TYPE(Variable_t), POINTER :: FabricSol, TempSol, FabricVariable, FlowVariable, &
-                                  EigenFabricVariable,MeshVeloVariable,&
+                                  MeshVeloVariable,&
                                   OOPlaneRotSol13,OOPlaneRotSol23,GradSol
 
      REAL(KIND=dp), POINTER :: Temperature(:),Fabric(:), &
-           FabricValues(:), FlowValues(:), EigenFabricValues(:), &
+           FabricValues(:), FlowValues(:), &
            MeshVeloValues(:), Solution(:), Ref(:), &
            OOPlaneRotValues13(:), OOPlaneRotValues23(:)
 
 
      INTEGER, POINTER :: TempPerm(:),FabricPerm(:),NodeIndexes(:), &
-                        FlowPerm(:),MeshVeloPerm(:),EigenFabricPerm(:),&
+                        FlowPerm(:),MeshVeloPerm(:),&
                         OOPlaneRotPerm13(:),OOPlaneRotPerm23(:),GradPerm(:)
 
      REAL(KIND=dp) :: rho,lambda0,gamma0   !Interaction parameter,diffusion parameter
@@ -123,14 +123,15 @@
        LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
        Alpha(:,:),Beta(:), &
        Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:), &
-       LocalA4(:,:),ElGradVals(:,:,:),LocalGrad(:, :),LocalFabric(:,:)
+       LocalA4(:,:),ElGradVals(:,:,:),LocalGrad(:, :),LocalFabric(:,:),&
+       LocalLHS(:, :), ElLHSVals(:, :, :)
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, &
           Wn,  FabricGrid, rho, lambda0, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
           spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad,gamma0,&
-          LocalFabric
+          LocalFabric, LocalLHS, ElLHSVals
 !------------------------------------------------------------------------------
      CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
      OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
@@ -138,7 +139,7 @@
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
 
-     INTEGER, PARAMETER :: LCap=4, fab_len=14
+     INTEGER, PARAMETER :: LCap=4, fab_len=15
 
      SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal
 #ifdef USE_ISO_C_BINDINGS
@@ -278,7 +279,9 @@
          DEALLOCATE( LocalTemperature, &
                      LocalFabric, &
                      ElGradVals, &
+                     ElLHSVals, &
                      LocalGrad,&
+                     LocalLHS,&
                      Force, LocalFluidity, &
                      Velocity,MeshVelocity, &
                      MASS,STIFF,      &
@@ -289,8 +292,10 @@
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
                  LocalFabric(fab_len, N),&
-                 ElGradVals(Solver % NumberOFActiveElements, fab_len,N), &
+                 ElGradVals(Solver % NumberOFActiveElements, fab_len, N), &
+                 ElLHSVals(Solver % NumberOFActiveElements, fab_len, N), &
                  LocalGrad(fab_len,N), &
+                 LocalLHS(fab_len,N), &
                  Force( 2*STDOFs*N ), &
                  Velocity(4, N ),MeshVelocity(3,N), &
                  MASS( 2*STDOFs*N,2*STDOFs*N ),  &
@@ -368,8 +373,6 @@
 !------------------------------------------------------------------------------
        at  = CPUTime()
        at0 = RealTime()
-
-
        CALL Info( 'FabricSolve', ' ', Level=4 )
        CALL Info( 'FabricSolve', ' ', Level=4 )
        CALL Info( 'FabricSolve', &
@@ -380,9 +383,6 @@
                      '-------------------------------------',Level=4 )
        CALL Info( 'FabricSolve', ' ', Level=4 )
        CALL Info( 'FabricSolve', 'Starting assembly...',Level=4 )
-
-!------------------------------------------------------------------------------
-
        PrevUNorm = UNorm
 
        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -440,17 +440,16 @@
             LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
             LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
         END IF
-         CALL FabGrad(LocalGrad,LocalFabric, LocalTemperature, LocalFluidity,  Velocity, &
-           MeshVelocity, CurrentElement, n, ElementNodes, Wn, rho, lambda0, gamma0, &
-           LocalOOP23, LocalOOP13)
+         CALL FabGrad( LocalGrad, LocalLHS, LocalFabric, &
+                       LocalTemperature, LocalFluidity,  Velocity, &
+                       MeshVelocity, CurrentElement, n, ElementNodes, &
+                       Wn, rho, lambda0, gamma0, LocalOOP23, LocalOOP13)
          ElGradVals(t, :, :) = LocalGrad(:, :)
+         ElLHSVals(t, :, :) = LocalGrad(:, :)
        END DO  ! active elements
  
        
        DO COMP=1,fab_len
-         ! We can ignore components with a 3 index if dim is low
-         IF ((spoofdim.le.2).AND.( ANY((/ 4, 5, 9, 10, 11, 13 /) == COMP))) CYCLE
-
        Solver % Variable % Values = CurrFabric( COMP::fab_len )
        IF ( TransientSimulation ) THEN
           Solver % Variable % PrevValues(:,1) = PrevFabric( COMP::fab_len )
@@ -490,7 +489,6 @@
          LocalFluidity(1:n) = ListGetReal( Material, &
                          'Fluidity Parameter', n, NodeIndexes, GotIt,&
                          UnFoundFatal=UnFoundFatal)
-         !Previous default value: LocalFluidity(1:n) = 1.0
 !------------------------------------------------------------------------------
 !        Get element local stiffness & mass matrices
 !------------------------------------------------------------------------------
@@ -521,9 +519,10 @@
 !----------------------------------
 
         LocalGrad(:, :) = ElGradVals(t, :, :)
+        LocalLHS(:, :) = ElLHSVals(t, :, :)
         CALL LocalMatrix( comp, MASS, STIFF, FORCE, LOAD, LocalGrad, &
-                          Velocity, MeshVelocity, CurrentElement, n, &
-                          ElementNodes, spoofdim)
+                          LocalLHS, Velocity, MeshVelocity, &
+                          CurrentElement, n, ElementNodes, spoofdim)
 
 !------------------------------------------------------------------------------
 !        Update global matrices from local matrices 
@@ -680,9 +679,6 @@
       n1 = Solver % Mesh % NumberOfNodes
       ALLOCATE( Ref(n1) )
       Ref = 0
-      !
-      ! fabriques à 0 dans le cas ou on a 2 domaines dont l'un a la
-      ! fabrique fixe
       TempFabVal(COMP::fab_len ) = 0. !fab
       
       DO t=1,Solver % NumberOfActiveElements
@@ -711,28 +707,6 @@
       END DO
 
       DEALLOCATE( Ref )
-
-      ! This is just numerical protection...
-      SELECT CASE( Comp ) 
-      CASE(1)
-      FabricValues( COMP:SIZE(FabricValues):fab_len ) = &
-          MIN(MAX( FabricValues( COMP:SIZE(FabricValues):fab_len ) , 0._dp),1._dp)
-          
-      CASE(2)
-       FabricValues( COMP:SIZE(FabricValues):fab_len ) = &
-       MIN(MAX( FabricValues( COMP:SIZE(FabricValues):fab_len ) , 0._dp),1._dp)
-      CASE(6)
-        FabricValues( COMP:SIZE(FabricValues):fab_len ) = &
-        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):fab_len ) , 0._dp),FabricValues( 1:SIZE(FabricValues):fab_len ))
-      CASE(7)
-        FabricValues( COMP:SIZE(FabricValues):fab_len ) = &
-        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):fab_len ) , 0._dp),FabricValues( 2:SIZE(FabricValues):fab_len ))
-
-      CASE(8)
-        FabricValues( COMP:SIZE(FabricValues):fab_len ) = &
-        MIN(MAX( FabricValues( COMP:SIZE(FabricValues):fab_len ) , 0._dp),FabricValues( 1:SIZE(FabricValues):fab_len ))
-      END SELECT
-
       END DO ! End DO Comp
 
        DO i=1,Solver % NumberOFActiveElements
@@ -768,44 +742,6 @@
             iter > NewtonIter ) NewtonLinearization = .TRUE.
 
       IF ( RelativeChange < NonLinearTol ) EXIT
-
-!------------------------------------------------------------------------------
-      EigenFabricVariable => &
-       VariableGet( Solver % Mesh % Variables, 'EigenV' )
-     IF ( ASSOCIATED( EigenFabricVariable ) ) THEN
-         EigenFabricPerm    => EigenFabricVariable % Perm
-         EigenFabricValues => EigenFabricVariable % Values
-      
-         DO t=1,Solver % NumberOFActiveElements
-
-           CurrentElement => GetActiveElement(t)
-           n = GetElementNOFNodes()
-           NodeIndexes => CurrentElement % NodeIndexes
-
-           Do i=1,n
-            a2(1)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+1 )
-            a2(2)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+2 )
-            a2(3)=1.0_dp - a2(1) - a2(2)
-            a2(4)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+3 )
-            a2(5)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+4 )
-            a2(6)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+5 )
-
-            call R2Ro(a2,dim,spoofdim,ai,angle)
-
-            angle(:)=angle(:)*rad2deg
-            If (angle(1).gt.90._dp) angle(1)=angle(1)-180._dp
-            If (angle(1).lt.-90._dp) angle(1)=angle(1)+180._dp
-          
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 1)=ai(1)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 2)=ai(2)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 3 )=ai(3)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 4 )=angle(1)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 5 )=angle(2)
-           EigenFabricValues( 6 * (EigenFabricPerm(NodeIndexes(i))-1) + 6 )=angle(3)
-           End do
-        END DO
-
-      END IF
 !------------------------------------------------------------------------------
     END DO ! of nonlinear iter
 !------------------------------------------------------------------------------
@@ -912,14 +848,14 @@ CONTAINS
       END SUBROUTINE GetMaterialDefs
 !------------------------------------------------------------------------------
 
-      SUBROUTINE FabGrad( Gradient, NodalFabric, &
+      SUBROUTINE FabGrad( Gradient, LHS, NodalFabric, &
           NodalTemperature, NodalFluidity, NodalVelo, NodMeshVel, &
           Element, n, Nodes, Wn, rho,lambda0,gamma0,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
      REAL(KIND=dp) :: NodalVelo(:,:),NodMeshVel(:,:),NodalFabric(:,:)
      REAL(KIND=dp), DIMENSION(:) :: NodalTemperature, NodalFluidity
      REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
-     REAL(KIND=dp), Intent(OUT) :: Gradient(:,:)
+     REAL(KIND=dp), Intent(OUT) :: Gradient(:,:), LHS(:,:)
 
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t) :: Element
@@ -1112,13 +1048,14 @@ CONTAINS
 
 !------------------------------------------------------------------------------
       SUBROUTINE LocalMatrix( Comp, MASS, STIFF, FORCE, LOAD, &
-          Grad, NodalVelo, NodMeshVel, &
+          Grad, LHS, NodalVelo, NodMeshVel, &
           Element, n, Nodes, dim)
 !------------------------------------------------------------------------------
       ! Note that dim is increased by 1 for out-of-page stress/strain
 
       REAL(KIND=dp) :: STIFF(:,:),MASS(:,:)
-      REAL(KIND=dp) :: LOAD(:,:),NodalVelo(:,:),NodMeshVel(:,:),Grad(:,:)
+      REAL(KIND=dp) :: LOAD(:,:),NodalVelo(:,:),NodMeshVel(:,:),&
+                       Grad(:,:),LHS(:,:)
       REAL(KIND=dp), DIMENSION(:) :: FORCE
       TYPE(Nodes_t) :: Nodes
       TYPE(Element_t) :: Element
