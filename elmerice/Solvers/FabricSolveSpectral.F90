@@ -35,7 +35,7 @@
 ! *****************************************************************************/
 !>  Solver for fabric parameter equations 
 !------------------------------------------------------------------------------
-      RECURSIVE SUBROUTINE FabricSolverRecryst( Model,Solver,dt,TransientSimulation )
+      RECURSIVE SUBROUTINE FabricSolverSpectral( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
       USE SpecFab
       USE DefUtils
@@ -1412,5 +1412,5 @@ CONTAINS
 !------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
- END SUBROUTINE FabricSolverRecryst
+ END SUBROUTINE FabricSolverSpectral
 !------------------------------------------------------------------------------

@@ -107,7 +107,7 @@ SET(ElmerIce_SRC ElmerIceUtils.F90 AIFlowSolve_nlD2.F90 AIFlowSolve_nlS2.F90  AI
 
 IF(HAVE_SpecFab)
     MESSAGE(STATUS "Adding Specs")
-    SET(ElmerIce_SRC ${ElmerIce_SRC} SpectralFabricSolve.F90 SpectralLaw.F90 FabricSolveRecryst.F90)
+    SET(ElmerIce_SRC ${ElmerIce_SRC} SpectralFabricSolve.F90 SpectralLaw.F90 FabricSolveRecryst.F90 FabricSolveSpectral.F90)
 ENDIF()
 
 IF(HAVE_ODEPack)
