@@ -1156,7 +1156,7 @@ CONTAINS
         SD(i)= (1._dp - rho)*StrainRate(INDi(i),INDj(i)) + rho *&
                                    Theta *  Stress(INDi(i),INDj(i))
       END DO
-      Deq=sqrt(2._dp*(SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
+      Deq=sqrt((SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
                              (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
 
       ! simplest to do this in celcius
