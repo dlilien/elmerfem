@@ -86,23 +86,23 @@
      INTEGER :: NewtonIter,NonlinearIter
 
      TYPE(Variable_t), POINTER :: FabricSol, TempSol, FabricVariable, FlowVariable, &
-                                  MeshVeloVariable,&
+                                  MeshVeloVariable,TensorFabricVariable,&
                                   OOPlaneRotSol13,OOPlaneRotSol23,GradSol
 
      REAL(KIND=dp), POINTER :: Temperature(:),Fabric(:), &
-           FabricValues(:), FlowValues(:), &
+           FabricValues(:), FlowValues(:),TensorFabricValues(:),&
            MeshVeloValues(:), Solution(:), Ref(:), &
            OOPlaneRotValues13(:), OOPlaneRotValues23(:)
 
 
      INTEGER, POINTER :: TempPerm(:),FabricPerm(:),NodeIndexes(:), &
-                        FlowPerm(:),MeshVeloPerm(:),&
+                        FlowPerm(:),MeshVeloPerm(:),TensorFabricPerm(:),&
                         OOPlaneRotPerm13(:),OOPlaneRotPerm23(:),GradPerm(:)
 
      REAL(KIND=dp) :: rho,lambda0,gamma0   !Interaction parameter,diffusion parameter
      REAL(KIND=dp) :: A1plusA2
      Real(KIND=dp), parameter :: Rad2deg=180._dp/Pi
-     REAL(KIND=dp) :: a2(6)
+     REAL(KIND=dp) :: a2(6), a2short(5)
      REAL(KIND=dp) :: ai(3), Angle(3)
 
      LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
@@ -125,13 +125,14 @@
        Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:), &
        LocalA4(:,:),ElGradVals(:,:,:),LocalGrad(:, :),LocalFabric(:,:),&
        LocalLHS(:, :), ElLHSVals(:, :, :)
+     COMPLEX(KIND=dp), ALLOCATABLE:: nlm(:)
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, &
           Wn,  FabricGrid, rho, lambda0, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
           spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad,gamma0,&
-          LocalFabric, LocalLHS, ElLHSVals
+          LocalFabric, LocalLHS, ElLHSVals, nlm
 !------------------------------------------------------------------------------
      CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
      OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
@@ -139,7 +140,7 @@
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
 
-     INTEGER, PARAMETER :: LCap=6, fab_len=28
+     INTEGER, PARAMETER :: LCap=4, fab_len=15
 
      SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal
 #ifdef USE_ISO_C_BINDINGS
@@ -287,11 +288,13 @@
                      MASS,STIFF,      &
                      LOAD, Alpha, Beta, &
                      CurrFabric, TempFabVal, &
+                     nlm, &
                      LocalOOP13, LocalOOP23 )
        END IF
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
                  LocalFabric(fab_len, N),&
+                 nlm(fab_len),&
                  ElGradVals(Solver % NumberOFActiveElements, fab_len, N), &
                  ElLHSVals(Solver % NumberOFActiveElements, fab_len, N), &
                  LocalGrad(fab_len,N), &
@@ -449,7 +452,10 @@
        END DO  ! active elements
  
        
+       ! Note that the first component of the fabric is unchanged
+       ! (normalization)
        DO COMP=1,fab_len
+         IF ((SPOOFDIM.LE.2).AND.ANY(COMP==(/1, 3, 5, 8, 10, 12, 14/))) CYCLE
        Solver % Variable % Values = CurrFabric( COMP::fab_len )
        IF ( TransientSimulation ) THEN
           Solver % Variable % PrevValues(:,1) = PrevFabric( COMP::fab_len )
@@ -742,6 +748,31 @@
             iter > NewtonIter ) NewtonLinearization = .TRUE.
 
       IF ( RelativeChange < NonLinearTol ) EXIT
+      TensorFabricVariable => &
+       VariableGet( Solver % Mesh % Variables, 'TensorFabric' )
+     IF ( ASSOCIATED( TensorFabricVariable ) ) THEN
+         TensorFabricPerm  => TensorFabricVariable % Perm
+         TensorFabricValues => TensorFabricVariable % Values
+      
+         DO t=1,Solver % NumberOFActiveElements
+
+           CurrentElement => GetActiveElement(t)
+           n = GetElementNOFNodes()
+           NodeIndexes => CurrentElement % NodeIndexes
+
+           DO i = 1,fab_len
+             LocalFabric(i, 1:n) = CurrFabric( fab_len*(Solver % Variable %Perm(Indexes(1:n))-1)+i)
+           END DO
+
+           Do i=1,n
+             nlm = CMPLX(PACK(LocalFabric(:, i),.TRUE.), KIND=dp)
+             a2short(:) = a2_to_ae2(a2_ij(nlm))
+             TensorFabricValues(5*(TensorFabricPerm(NodeIndexes(i))-1)+1:&
+                                5*(TensorFabricPerm(NodeIndexes(i))-1)+5)=&
+               a2short(:)
+           END DO
+         END DO
+      END IF
 !------------------------------------------------------------------------------
     END DO ! of nonlinear iter
 !------------------------------------------------------------------------------
@@ -883,7 +914,7 @@ CONTAINS
      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
      REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3),eps(3,3)
      REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS, Fabric(fab_len)
-     REAL(KIND=dp) :: dndt(fab_len, fab_len), dndt_ROT(fab_len, fab_len),&
+     COMPLEX(KIND=dp) :: dndt(fab_len, fab_len), dndt_ROT(fab_len, fab_len),&
                       dndt_DDRX(fab_len, fab_len), dndt_CDRX(fab_len, fab_len)
      Integer :: INDi(6),INDj(6)
      INTEGER :: N_Integ
@@ -932,6 +963,9 @@ CONTAINS
       S_Integ => IntegStuff % s
       N_Integ =  IntegStuff % n
 
+
+      LHS = 0.0_dp
+      Gradient = 0.0_dp
 !
 !   Now we start integrating:
 !   -------------------------
@@ -1065,8 +1099,8 @@ CONTAINS
       dndt = gammav * dndt_DDRX + dndt_CDRX + Wn(9) * dndt_ROT
       NodalGradient = REAL(MATMUL(dndt, Fabric))
       DO i=1,fab_len
-        Gradient(i, t) = NodalGradient(i) - REAL(dndt(i, i) * Fabric(i))
-        LHS(i, t) = REAL(dndt(i, i) * Fabric(i))
+        Gradient(i, t) = NodalGradient(i) - REAL(dndt_ROT(i, i) * Fabric(i))
+        LHS(i, t) = REAL(dndt_ROT(i, i))
       END DO
       END DO ! N_Integ
        END SUBROUTINE FabGrad
@@ -1132,7 +1166,7 @@ CONTAINS
         END DO
         Unorm = SQRT( SUM( Velo**2._dp ) )
 
-        c0 = LHS(COMP, t)
+        C0 = LHS(COMP, t)
         LoadAtIp = Grad(COMP, t)
         DO p=1,NBasis
           DO q=1,NBasis
