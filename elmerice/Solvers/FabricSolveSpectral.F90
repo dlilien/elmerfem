@@ -107,11 +107,11 @@
 
      LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
      LOGICAL :: OOPlaneRot13
-     LOGICAL :: OOPlaneRot23
+     LOGICAL :: OOPlaneRot23, zero_order
 
-     INTEGER :: body_id,bf_id,eq_id, comp, Indexes(128)
+     INTEGER :: body_id,bf_id,eq_id, comp, realcomp, Indexes(128)
 !
-     INTEGER :: old_body = -1
+     INTEGER :: old_body = -1, prev_comps, spectral_l, spectral_m
 
      REAL(KIND=dp) :: FabricGrid(4879)
                         
@@ -140,9 +140,9 @@
      REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
 
-     INTEGER, PARAMETER :: LCap=4, fab_len=15
+     INTEGER :: LCap, fab_len
 
-     SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal
+     SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal, LCap, fab_len
 #ifdef USE_ISO_C_BINDINGS
      REAL(KIND=dp) :: at, at0
 #else
@@ -160,7 +160,11 @@
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
+      SolverParams => GetSolverParams()
+
       IF (FIRSTTIME) THEN
+        LCap = ListGetInteger( SolverParams, 'LCap', GotIt, UnfoundFatal=.TRUE.)
+        fab_len = 2 * sum([(1+i*2, i=0, Lcap,2)])
         CALL initspecfab(Lcap)
         FIRSTTIME = .FALSE.
       END IF
@@ -176,7 +180,6 @@
       Solution => Solver % Variable % Values
       STDOFs   =  Solver % Variable % DOFs
 
-      SolverParams => GetSolverParams()
       FabVarName = ListGetString( SolverParams,'Fabric Name',GotIt,UnFoundFatal=.FALSE. )
       IF (.NOT.GotIt) THEN
           FabVarName = 'Fabric'
@@ -443,7 +446,7 @@
             LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
             LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
         END IF
-         CALL FabGrad( LocalGrad, LocalLHS, fab_len, LocalFabric, &
+         CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
                        LocalTemperature, LocalFluidity,  Velocity, &
                        MeshVelocity, CurrentElement, n, ElementNodes, &
                        Wn, rho, lambda0, gamma0, LocalOOP23, LocalOOP13)
@@ -452,10 +455,37 @@
        END DO  ! active elements
  
        
-       ! Note that the first component of the fabric is unchanged
-       ! (normalization)
-       DO COMP=1,fab_len
-         IF ((SPOOFDIM.LE.2).AND.ANY(COMP==(/1, 3, 5, 8, 10, 12, 14/))) CYCLE
+       outer: DO COMP=1,fab_len
+         spectral_l = 0
+         spectral_m = 0
+         prev_comps = 1
+        
+        ! Mod does not quite work
+         IF (COMP.LE.fab_len / 2) THEN
+           RealComp = COMP
+         ELSE
+           RealComp = COMP - fab_len / 2
+         END IF
+
+         ! 0,0 does not change
+         if (RealComp == 1) CYCLE outer
+
+         DO WHILE (prev_comps.LT.RealComp)
+           spectral_l = spectral_l + 2
+           spectral_m = RealComp - prev_comps - (spectral_l + 1)
+           prev_comps = prev_comps + spectral_l * 2 + 1
+         END DO
+         
+         ! cycle the components where we know the answer by symmetry
+         IF (spectral_m.LT.0) cycle outer
+
+         ! Cycle imaginary part of zeroeth order components since
+         ! identically zero
+         IF ((spectral_m == 0).AND.(Comp.GT.RealComp)) CYCLE outer
+
+         ! Cycle if odd order and no out of page
+         IF ((spoofdim.le.2).AND.(mod(spectral_m, 2) == 1)) CYCLE outer
+
        Solver % Variable % Values = CurrFabric( COMP::fab_len )
        IF ( TransientSimulation ) THEN
           Solver % Variable % PrevValues(:,1) = PrevFabric( COMP::fab_len )
@@ -699,6 +729,15 @@
             Solver % Variable % Values( Solver % Variable % Perm(Indexes(i)) )
             FabricValues( fab_len*(FabricPerm(k)-1) + COMP ) = &
                           TempFabVal(fab_len*(FabricPerm(k)-1) + COMP ) 
+            IF (spectral_m.gt.0) THEN
+              IF (COMP.LE.fab_len / 2) THEN
+                FabricValues( fab_len*(FabricPerm(k)-1) + COMP - 2 * spectral_m) = &
+                          (-1.0_dp) ** spectral_m * TempFabVal(fab_len*(FabricPerm(k)-1) + COMP ) 
+               ELSE
+                FabricValues( fab_len*(FabricPerm(k)-1) + COMP - 2 * spectral_m) = &
+                          -(-1.0_dp) ** spectral_m * TempFabVal(fab_len*(FabricPerm(k)-1) + COMP ) 
+              END IF
+            END IF
             Ref(k) = Ref(k) + 1
          END DO
       END DO
@@ -709,11 +748,15 @@
          IF ( Ref(i) > 0 ) THEN
             FabricValues( fab_len*(j-1)+COMP ) = &
                    FabricValues( fab_len*(j-1)+COMP ) / Ref(i)
+            IF (spectral_m.gt.0) THEN
+                FabricValues( fab_len*(j-1)+COMP -2 * spectral_m ) = &
+                   FabricValues( fab_len*(j-1)+COMP - 2 * spectral_m ) / Ref(i)
+            END IF
          END IF
       END DO
 
       DEALLOCATE( Ref )
-      END DO ! End DO Comp
+      END DO outer ! End DO Comp
 
        DO i=1,Solver % NumberOFActiveElements
           CurrentElement => GetActiveElement(i)   
@@ -879,12 +922,12 @@ CONTAINS
       END SUBROUTINE GetMaterialDefs
 !------------------------------------------------------------------------------
 
-      SUBROUTINE FabGrad( Gradient, LHS, fab_len, NodalFabric, &
+      SUBROUTINE FabGrad( Gradient, LHS, nlm_len, NodalFabric, &
                           NodalTemperature, NodalFluidity, NodalVelo, &
                           NodMeshVel, Element, n, Nodes, Wn, rho, &
                           lambda0,gamma0,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
-     INTEGER :: fab_len
+     INTEGER :: nlm_len
      REAL(KIND=dp) :: NodalVelo(:,:),NodMeshVel(:,:),NodalFabric(:,:)
      REAL(KIND=dp), DIMENSION(:) :: NodalTemperature, NodalFluidity
      REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
@@ -895,7 +938,7 @@ CONTAINS
      INTEGER :: n, Comp
 !------------------------------------------------------------------------------
 !
-     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1),NodalGradient(fab_len)
+     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
      REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
 
      REAL(KIND=dp) :: Theta
@@ -913,9 +956,10 @@ CONTAINS
 
      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
      REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3),eps(3,3)
-     REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS, Fabric(fab_len)
-     COMPLEX(KIND=dp) :: dndt(fab_len, fab_len), dndt_ROT(fab_len, fab_len),&
-                      dndt_DDRX(fab_len, fab_len), dndt_CDRX(fab_len, fab_len)
+     REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS
+     COMPLEX(KIND=dp) :: Fabric(nlm_len), NodalGradient(nlm_len)
+     COMPLEX(KIND=dp) :: dndt(nlm_len, nlm_len), dndt_ROT(nlm_len, nlm_len),&
+                      dndt_DDRX(nlm_len, nlm_len), dndt_CDRX(nlm_len, nlm_len)
      Integer :: INDi(6),INDj(6)
      INTEGER :: N_Integ
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
@@ -988,8 +1032,10 @@ CONTAINS
 !     ------------------------------------------------
       Temperature = SUM( NodalTemperature(1:n) * Basis(1:n) ) 
 
-      DO i=1,fab_len
-       Fabric(i) = SUM(NodalFabric(i,1:n)*Basis(1:n))
+      DO i=1,nlm_len
+       Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
+                         SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
+                         KIND=dp)
       END DO
       Theta = 1._dp / ( FabricGrid(5) + FabricGrid(6) )
       
@@ -1093,14 +1139,16 @@ CONTAINS
 
       dndt_ROT = dndt_ij_LATROT(EPS, Spin1, 0.0_dp * Strainrate,&
                                 0.0_dp, 0.0_dp, 0.0_dp, 1.0_dp)
-      dndt_DDRX = dndt_ij_DDRX(CMPLX(Fabric, kind=dp), EPS)
+      dndt_DDRX = dndt_ij_DDRX(Fabric, EPS)
       dndt_CDRX = f_nu_eps(lambda, StrainRate) * dndt_ij_REG()
 
       dndt = gammav * dndt_DDRX + dndt_CDRX + Wn(9) * dndt_ROT
-      NodalGradient = REAL(MATMUL(dndt, Fabric))
-      DO i=1,fab_len
-        Gradient(i, t) = NodalGradient(i) - REAL(dndt_ROT(i, i) * Fabric(i))
-        LHS(i, t) = REAL(dndt_ROT(i, i))
+      NodalGradient = MATMUL(dndt, Fabric)
+      DO i=1,nlm_len
+        Gradient(i, t) = REAL(NodalGradient(i)) ! - REAL(dndt(i, i) * Fabric(i))
+        Gradient(i + nlm_len, t) = AIMAG(NodalGradient(i)) ! - AIMAG(dndt(i, i) * Fabric(i))
+        ! LHS(i, t) = REAL(dndt(i, i))
+        ! LHS(i + nlm_len / 2, t) = AIMAG(dndt(i, i))
       END DO
       END DO ! N_Integ
        END SUBROUTINE FabGrad
