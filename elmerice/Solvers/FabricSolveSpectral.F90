@@ -480,7 +480,7 @@
          IF (spectral_m.LT.0) cycle outer
 
          ! Cycle imaginary part of zeroeth order components since
-         ! identically zero
+         ! identically zero--This remains true for recrystallization
          IF ((spectral_m == 0).AND.(Comp.GT.RealComp)) CYCLE outer
 
          ! Cycle if odd order and no out of page
@@ -1043,7 +1043,7 @@ CONTAINS
       StrainRate = 0.0
       Spin1 = 0.0
 
-      a2full = a2_ij(CMPLX(Fabric, KIND=dp))
+      a2full = a2_ij(Fabric)
 !
 !    Material parameters at that point
 !    ---------------------------------
@@ -1139,10 +1139,10 @@ CONTAINS
 
       dndt_ROT = dndt_ij_LATROT(EPS, Spin1, 0.0_dp * Strainrate,&
                                 0.0_dp, 0.0_dp, 0.0_dp, 1.0_dp)
-      dndt_DDRX = dndt_ij_DDRX(Fabric, EPS)
-      dndt_CDRX = f_nu_eps(lambda, StrainRate) * dndt_ij_REG()
+      dndt_DDRX = dndt_ij_DDRX(Fabric, Stress)
+      dndt_CDRX = dndt_ij_CDRX()
 
-      dndt = gammav * dndt_DDRX + dndt_CDRX + Wn(9) * dndt_ROT
+      dndt = gammav * dndt_DDRX + lambda * dndt_CDRX + Wn(9) * dndt_ROT
       NodalGradient = MATMUL(dndt, Fabric)
       DO i=1,nlm_len
         Gradient(i, t) = REAL(NodalGradient(i)) ! - REAL(dndt(i, i) * Fabric(i))
