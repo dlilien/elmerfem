@@ -22,7 +22,7 @@
 ! *****************************************************************************/
 ! ******************************************************************************
 ! *
-! *  Authors:  David Lilien modified from standard fabric by
+! *  Authors:  David Lilien and Nicholas Rathmann modified from standard fabric by
 ! *                Juha Ruokolainen, Olivier Gagliardini, Fabien Gillet-Chaulet
 ! *  Email:   david.lilien@nbi.ku.dk and Juha.Ruokolainen@csc.fi
 ! *  Web:     http://elmerice.elmerfem.org
@@ -80,7 +80,7 @@
               ParentElement, LeftParent, RightParent, Edge
 
      REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm,Gravity(3), &
-         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(12)
+         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(13)
 
 
      INTEGER :: NewtonIter,NonlinearIter
@@ -914,6 +914,11 @@ CONTAINS
         Wn(12) = 1.0e8_dp
       END IF
 
+      Wn(13) = ListGetConstReal( Material, 'Spatial Fabric Diffusion', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(13) = 1.0e2_dp
+      END IF
+
       gamma0 = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
       WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gamma0
       CALL INFO('AIFlowSolve', Message, Level = 20)
@@ -1226,6 +1231,13 @@ CONTAINS
             ! Advection terms:
             DO j=1,dim
                A = A - Velo(j) * Basis(q) * dBasisdx(p,j)
+            END DO
+
+            ! Diffusion is required for stability
+            DO i=1,dim
+              DO j=1,dim
+                A = A + Wn(13) * dBasisdx(q,i) * dBasisdx(p,j)
+              END DO
             END DO
 
             ! Add nodal matrix to element matrix:
