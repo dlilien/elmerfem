@@ -171,7 +171,7 @@
 
       Wn(7) = ListGetConstReal( Model % Constants, 'Gas Constant', GotIt,UnFoundFatal=UnFoundFatal )
       WRITE(Message,'(A,F10.4)')'Gas Constant =',Wn(7)
-      CALL INFO('FabricSolveRecryst',Message,Level=4)
+      CALL INFO('FabricSolveSpectral',Message,Level=4)
 !------------------------------------------------------------------------------
 !    Get variables needed for solution
 !------------------------------------------------------------------------------
@@ -184,7 +184,7 @@
       IF (.NOT.GotIt) THEN
           FabVarName = 'Fabric'
           WRITE(Message,'(A,A)') 'Fabric name unfound, using ', FabVarName
-          CALL INFO('FabricSolveRecryst', Message , level = 3)
+          CALL INFO('FabricSolveSpectral', Message , level = 3)
       END IF
       FabricSol    => VariableGet( Solver % Mesh % Variables, FabVarName )
       IF ( ASSOCIATED( FabricSol) ) THEN
@@ -193,13 +193,13 @@
       ELSE
         WRITE(Message,'(A,A,A)') 'Fabric variable ', FabVarName, &
             ' not found, quitting'
-        CALL FATAL('FabricSolveRecryst', Message)
+        CALL FATAL('FabricSolveSpectral', Message)
       END IF
 
       IF (FabricSol % DOFs .NE. fab_len) THEN
         WRITE(Message,'(A,A,A)') 'Fabric variable ', FabVarName,&
                                  ' must have fab_len DoFs'
-        CALL FATAL('FabricSolveRecryst', Message)
+        CALL FATAL('FabricSolveSpectral', Message)
       END IF
 
       TempVar = ListGetString( SolverParams,'Temperature Solution Name',&
@@ -213,7 +213,7 @@
         Temperature => TempSol % Values
       END IF
       WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
-      CALL INFO('FabricSolveRecryst', Message , level = 20)
+      CALL INFO('FabricSolveSpectral', Message , level = 20)
       OOPlaneRotVar23 = ListGetString( SolverParams, &
         'OOPlane23 Strain Name',GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
@@ -228,7 +228,7 @@
           END IF
       END IF
       WRITE(Message,'(A,A)') 'OOPlane23 variable = ', OOPlaneRotVar23
-      CALL INFO('FabricSolveRecryst', Message , level = 20)
+      CALL INFO('FabricSolveSpectral', Message , level = 20)
 
       OOPlaneRotVar13 = ListGetString( SolverParams,&
         'OOPlane13 Strain Name',GotIt,UnFoundFatal=.FALSE.)
@@ -244,7 +244,7 @@
           END IF
       END IF
       WRITE(Message,'(A,A)') 'OOPlane13 variable = ', OOPlaneRotVar13
-      CALL INFO('FabricSolveRecryst', Message , level = 20)
+      CALL INFO('FabricSolveSpectral', Message , level = 20)
       FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
       IF ( ASSOCIATED( FlowVariable ) ) THEN
        FlowPerm    => FlowVariable % Perm
@@ -314,7 +314,7 @@
 
 
        IF ( istat /= 0 ) THEN
-          CALL Fatal( 'FabricSolveRecryst', 'Memory allocation error.' )
+          CALL Fatal( 'FabricSolveSpectral', 'Memory allocation error.' )
        END IF
 
        CurrFabric = 0.
@@ -379,16 +379,16 @@
 !------------------------------------------------------------------------------
        at  = CPUTime()
        at0 = RealTime()
-       CALL Info( 'FabricSolve', ' ', Level=4 )
-       CALL Info( 'FabricSolve', ' ', Level=4 )
-       CALL Info( 'FabricSolve', &
+       CALL Info( 'FabricSolveSpectral', ' ', Level=4 )
+       CALL Info( 'FabricSolveSpectral', ' ', Level=4 )
+       CALL Info( 'FabricSolveSpectral', &
                     '-------------------------------------',Level=4 )
        WRITE( Message, * ) 'Fabric solver  iteration', iter
-       CALL Info( 'FabricSolve', Message,Level=4 )
-       CALL Info( 'FabricSolve', &
+       CALL Info( 'FabricSolveSpectral', Message,Level=4 )
+       CALL Info( 'FabricSolveSpectral', &
                      '-------------------------------------',Level=4 )
-       CALL Info( 'FabricSolve', ' ', Level=4 )
-       CALL Info( 'FabricSolve', 'Starting assembly...',Level=4 )
+       CALL Info( 'FabricSolveSpectral', ' ', Level=4 )
+       CALL Info( 'FabricSolveSpectral', 'Starting assembly...',Level=4 )
        PrevUNorm = UNorm
 
        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -501,7 +501,7 @@
             (Solver % NumberOfActiveElements-t) / &
                (1.0*Solver % NumberOfActiveElements)), ' % done'
                        
-           CALL Info( 'FabricSolve', Message, Level=5 )
+           CALL Info( 'FabricSolveSpectral', Message, Level=5 )
            at0 = RealTime()
          END IF
 
@@ -567,7 +567,7 @@
          CALL DefaultUpdateEquations( STIFF, FORCE )
 !------------------------------------------------------------------------------
       END DO ! Active Elements
-      CALL Info( 'FabricSolve', 'Assembly done', Level=4 )
+      CALL Info( 'FabricSolveSpectral', 'Assembly done', Level=4 )
 !------------------------------------------------------------------------------
    
 !------------------------------------------------------------------------------
@@ -703,14 +703,14 @@
 
       CALL DefaultFinishAssembly()
 !------------------------------------------------------------------------------
-      CALL Info( 'FabricSolve', 'Set boundaries done', Level=4 )
+      CALL Info( 'FabricSolveSpectral', 'Set boundaries done', Level=4 )
 
 !------------------------------------------------------------------------------
 !     Solve the system and check for convergence
 !------------------------------------------------------------------------------
       Unorm = DefaultSolve()
       WRITE(Message,*) 'solve done', minval( solver % variable % values), maxval( Solver % variable % values)
-      CALL Info( 'FabricSolve', Message, Level=4 )
+      CALL Info( 'FabricSolveSpectral', Message, Level=4 )
       
       n1 = Solver % Mesh % NumberOfNodes
       ALLOCATE( Ref(n1) )
@@ -781,9 +781,9 @@
      END IF
 
       WRITE( Message, * ) 'Result Norm   : ',UNorm
-      CALL Info( 'FabricSolve', Message, Level=4 )
+      CALL Info( 'FabricSolveSpectral', Message, Level=4 )
       WRITE( Message, * ) 'Relative Change : ',RelativeChange
-      CALL Info( 'FabricSolve', Message, Level=4 )
+      CALL Info( 'FabricSolveSpectral', Message, Level=4 )
 
       
 !------------------------------------------------------------------------------
