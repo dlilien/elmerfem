@@ -690,7 +690,7 @@
          LOAD = 0.0d0
          GotIt = .FALSE.
          IF ( ASSOCIATED(BC) ) THEN
-            LOAD(1,1:n) = GetReal( BC, ComponentName('Fabric', Comp) , GotIt )
+            LOAD(1,1:n) = GetReal( BC, ComponentName(FabVarName, Comp) , GotIt )
          END IF
 
          MASS = 0.0d0
