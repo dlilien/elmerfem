@@ -916,7 +916,7 @@ CONTAINS
 
       Wn(13) = ListGetConstReal( Material, 'Spatial Fabric Diffusion', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
-        Wn(13) = 1.0e2_dp
+        Wn(13) = 5.0e-5_dp
       END IF
 
       gamma0 = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
