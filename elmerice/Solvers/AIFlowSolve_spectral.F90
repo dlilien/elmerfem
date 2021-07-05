@@ -177,6 +177,7 @@
         WRITE(Message,'(A,F10.4)') 'Gas Constant = ',   Wn(7)
         CALL INFO('AIFlowSolve', Message , level = 20)
       END IF
+
 !------------------------------------------------------------------------------
 !    Get variables needed for solution
 !------------------------------------------------------------------------------
@@ -215,7 +216,7 @@
           FabVarName = 'Fabric'
       END IF
 
-      FabricVariable => VariableGet(Solver % Mesh % Variables, 'Fabric')
+      FabricVariable => VariableGet(Solver % Mesh % Variables, FabVarName)
       IF ( ASSOCIATED( FabricVariable ) ) THEN
        FabDOFs = FabricVariable % DOFs
        FabricPerm    => FabricVariable % Perm
@@ -262,6 +263,7 @@
                      ElementNodes % y,     &
                      ElementNodes % z,     &
                      BoundaryDispl,        &
+                     LocalFabric,          &
                      ReferenceTemperature, &
                      LocalTemperature,     &
                      LocalFlowWidth,	   &
