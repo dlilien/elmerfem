@@ -297,7 +297,7 @@
 
        ALLOCATE( LocalTemperature( N ), LocalFluidity( N ), &
                  LocalFabric(fab_len, N),&
-                 nlm(fab_len),&
+                 nlm(fab_len/2),&
                  ElGradVals(Solver % NumberOFActiveElements, fab_len, N), &
                  ElLHSVals(Solver % NumberOFActiveElements, fab_len, N), &
                  LocalGrad(fab_len,N), &
@@ -819,7 +819,8 @@
            END DO
 
            Do i=1,n
-             nlm = CMPLX(LocalFabric(:fab_len / 2, i), LocalFabric(fab_len / 2:, i), KIND=dp)
+             nlm = CMPLX(LocalFabric(:fab_len / 2, i),&
+                         LocalFabric(fab_len / 2 + 1:, i), KIND=dp)
              a2short(:) = a2_to_ae2(a2_ij(nlm))
              TensorFabricValues(5*(TensorFabricPerm(NodeIndexes(i))-1)+1:&
                                 5*(TensorFabricPerm(NodeIndexes(i))-1)+5)=&
