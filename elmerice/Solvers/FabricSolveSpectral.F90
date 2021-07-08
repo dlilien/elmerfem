@@ -446,10 +446,17 @@
             LocalOOP13(1:n) = OOPlaneRotValues13(OOPlaneRotPerm13(NodeIndexes))
             LocalOOP23(1:n) = OOPlaneRotValues23(OOPlaneRotPerm23(NodeIndexes))
         END IF
+       IF (spoofdim.gt.dim) THEN
          CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
                        LocalTemperature, LocalFluidity,  Velocity, &
                        MeshVelocity, CurrentElement, n, ElementNodes, &
                        Wn, rho, lambda0, gamma0, LocalOOP23, LocalOOP13)
+       ELSE
+         CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
+                       LocalTemperature, LocalFluidity,  Velocity, &
+                       MeshVelocity, CurrentElement, n, ElementNodes, &
+                       Wn, rho, lambda0, gamma0)
+       END IF
          ElGradVals(t, :, :) = LocalGrad(:, :)
          ElLHSVals(t, :, :) = LocalGrad(:, :)
        END DO  ! active elements
@@ -789,11 +796,15 @@
 !------------------------------------------------------------------------------
       IF ( RelativeChange < NewtonTol .OR. &
             iter > NewtonIter ) NewtonLinearization = .TRUE.
-
       IF ( RelativeChange < NonLinearTol ) EXIT
+
+!------------------------------------------------------------------------------
+    END DO ! of nonlinear iter
+!------------------------------------------------------------------------------
+
       TensorFabricVariable => &
        VariableGet( Solver % Mesh % Variables, 'TensorFabric' )
-     IF ( ASSOCIATED( TensorFabricVariable ) ) THEN
+      IF ( ASSOCIATED( TensorFabricVariable ) ) THEN
          TensorFabricPerm  => TensorFabricVariable % Perm
          TensorFabricValues => TensorFabricVariable % Values
       
@@ -804,11 +815,11 @@
            NodeIndexes => CurrentElement % NodeIndexes
 
            DO i = 1,fab_len
-             LocalFabric(i, 1:n) = CurrFabric( fab_len*(Solver % Variable %Perm(Indexes(1:n))-1)+i)
+             LocalFabric(i, 1:n) = FabricValues(fab_len*(FabricPerm(NodeIndexes(1:n))-1)+i )
            END DO
 
            Do i=1,n
-             nlm = CMPLX(PACK(LocalFabric(:, i),.TRUE.), KIND=dp)
+             nlm = CMPLX(LocalFabric(:fab_len / 2, i), LocalFabric(fab_len / 2:, i), KIND=dp)
              a2short(:) = a2_to_ae2(a2_ij(nlm))
              TensorFabricValues(5*(TensorFabricPerm(NodeIndexes(i))-1)+1:&
                                 5*(TensorFabricPerm(NodeIndexes(i))-1)+5)=&
@@ -816,9 +827,6 @@
            END DO
          END DO
       END IF
-!------------------------------------------------------------------------------
-    END DO ! of nonlinear iter
-!------------------------------------------------------------------------------
 CONTAINS
 
       SUBROUTINE GetMaterialDefs()
