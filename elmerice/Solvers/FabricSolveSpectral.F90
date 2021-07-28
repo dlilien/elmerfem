@@ -819,12 +819,17 @@
            END DO
 
            Do i=1,n
-             nlm = CMPLX(LocalFabric(:fab_len / 2, i),&
-                         LocalFabric(fab_len / 2 + 1:, i), KIND=dp)
-             a2short(:) = a2_to_ae2(a2_ij(nlm))
+             a2short = (/ LocalFabric(6, i) - sqrt(2.0_dp / 3.0_dp) / 2.0_dp * LocalFabric(4, i), &
+                          -LocalFabric(6, i) - sqrt(2.0_dp / 3.0_dp) / 2.0_dp * LocalFabric(4, i), &
+                          -LocalFabric(fab_len / 2 + 6, i), &
+                          LocalFabric(fab_len / 2 + 5, i), &
+                          -LocalFabric(5, i) /)
+             a2short(:) = sqrt((8.0_dp * 3.14159265259_dp) / 15.0_dp) * a2short(:)
+             a2short(1) = a2short(1) + 1.0 / 3.0
+             a2short(2) = a2short(2) + 1.0 / 3.0
              TensorFabricValues(5*(TensorFabricPerm(NodeIndexes(i))-1)+1:&
                                 5*(TensorFabricPerm(NodeIndexes(i))-1)+5)=&
-               a2short(:)
+             a2short(:)
            END DO
          END DO
       END IF
@@ -965,7 +970,7 @@ CONTAINS
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
-     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), a2full(3, 3)
+     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6)
      REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
 
      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
@@ -1057,16 +1062,16 @@ CONTAINS
       StrainRate = 0.0
       Spin1 = 0.0
 
-      a2full = a2_ij(Fabric)
-!
-!    Material parameters at that point
-!    ---------------------------------
-      ai(1) = a2full(1, 1)
-      ai(2) = a2full(2, 2)
-      ai(3) = a2full(3, 3)
-      ai(4) = a2full(1, 2)
-      ai(5) = a2full(2, 3)
-      ai(6) = a2full(1, 3)
+      ai = (/ REAL(Fabric(6)) - sqrt(2.0_dp / 3.0_dp) / 2.0_dp * REAL(Fabric(4)), &
+              -REAL(Fabric(6)) - sqrt(2.0_dp / 3.0_dp) / 2.0_dp * REAL(Fabric(4)), &
+              sqrt(2.0_dp / 3.0_dp) * REAL(Fabric(4)), &
+              -AIMAG(Fabric(6)), &
+              AIMAG(Fabric(5)), &
+              -REAL(Fabric(5)) /)
+      ai(:) = sqrt((8.0_dp * 3.14159265259_dp) / 15.0_dp) * ai(:)
+      ai(1) = ai(1) + 1.0 / 3.0
+      ai(2) = ai(2) + 1.0 / 3.0
+      ai(3) = ai(3) + 1.0 / 3.0
 
       call R2Ro(ai,dim,spoofdim,ap,angle)
       CALL OPILGGE_ai_nl(ap, Angle, FabricGrid, C)
