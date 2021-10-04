@@ -80,7 +80,7 @@
               ParentElement, LeftParent, RightParent, Edge
 
      REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm,Gravity(3), &
-         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(13)
+         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(17)
 
 
      INTEGER :: NewtonIter,NonlinearIter
@@ -102,7 +102,7 @@
      REAL(KIND=dp) :: rho,lambda0,gamma0   !Interaction parameter,diffusion parameter
      REAL(KIND=dp) :: A1plusA2
      Real(KIND=dp), parameter :: Rad2deg=180._dp/Pi
-     REAL(KIND=dp) :: a2(6), a2short(5)
+     REAL(KIND=dp) :: a2short(5)
      REAL(KIND=dp) :: ai(3), Angle(3)
 
      LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
@@ -148,15 +148,7 @@
 #else
      REAL(KIND=dp) :: at, at0, CPUTime, RealTime
 #endif
-!------------------------------------------------------------------------------
-      INTERFACE
-        Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
-        USE Types
-        REAL(KIND=dp),intent(in) :: a2(6)
-        Integer :: dim, spoofdim
-        REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
-       End Subroutine R2Ro
-      End Interface                                                       
+                                                
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
@@ -933,6 +925,26 @@ CONTAINS
         Wn(13) = 5.0e-5_dp
       END IF
 
+      Wn(14) = ListGetConstReal( Material, 'Ecc', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(14) = 1.0d0
+      END IF
+
+      Wn(15) = ListGetConstReal( Material, 'Eca', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(15) = 1.0d3
+      END IF
+
+      Wn(16) = ListGetConstReal( Material, 'Rheology alpha', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(16) = 0.0125
+      END IF
+
+      Wn(17) = ListGetInteger( Material, 'Grain exponent', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(17) = 1
+      END IF
+
       gamma0 = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
       WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gamma0
       CALL INFO('AIFlowSolve', Message, Level = 20)
@@ -973,8 +985,9 @@ CONTAINS
      REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6)
      REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
 
-     REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),D(6),angle(3),epsi
-     REAL(KIND=dp) :: ap(3),C(6,6),Spin1(3,3),Stress(3,3),eps(3,3)
+     REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),epsi,SR(3,3)
+     REAL(KIND=dp) :: ap(3),Spin1(3,3),Stress(3,3),eps(3,3)
+
      REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS
      COMPLEX(KIND=dp) :: Fabric(nlm_len), NodalGradient(nlm_len)
      COMPLEX(KIND=dp) :: dndt(nlm_len, nlm_len), dndt_ROT(nlm_len, nlm_len),&
@@ -986,26 +999,16 @@ CONTAINS
      LOGICAL :: stat
      TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
 
-     INTERFACE
+     ! For new orthotropic law
+     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+     REAL(KIND=dp) :: A_specfab
+
+
+      INTERFACE
         FUNCTION BGlenT( Tc, W)
            USE Types
            REAL(KIND=dp) :: BGlenT,Tc,W(8)
         END FUNCTION
-         Subroutine R2Ro(ai,dim,spoofdim,a2,angle)
-         USE Types
-         REAL(KIND=dp),intent(in) :: ai(6)
-         Integer :: dim, spoofdim
-         REAL(KIND=dp),intent(out) :: a2(3), Angle(3)
-        End Subroutine R2Ro
-
-        Subroutine OPILGGE_ai_nl(a2,Angle,etaI,eta36)
-          USE Types
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: a2
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: Angle
-          REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
-          REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
-        END SUBROUTINE OPILGGE_ai_nl
-        
       END INTERFACE
 
       dim = CoordinateSystemDimension()
@@ -1062,19 +1065,6 @@ CONTAINS
       StrainRate = 0.0
       Spin1 = 0.0
 
-      ai = (/ REAL(Fabric(6)) - sqrt(2.0_dp / 3.0_dp) / 2.0_dp * REAL(Fabric(4)), &
-              -REAL(Fabric(6)) - sqrt(2.0_dp / 3.0_dp) / 2.0_dp * REAL(Fabric(4)), &
-              sqrt(2.0_dp / 3.0_dp) * REAL(Fabric(4)), &
-              -AIMAG(Fabric(6)), &
-              AIMAG(Fabric(5)), &
-              -REAL(Fabric(5)) /)
-      ai(:) = sqrt((8.0_dp * 3.14159265259_dp) / 15.0_dp) * ai(:)
-      ai(1) = ai(1) + 1.0 / 3.0
-      ai(2) = ai(2) + 1.0 / 3.0
-      ai(3) = ai(3) + 1.0 / 3.0
-
-      call R2Ro(ai,dim,spoofdim,ap,angle)
-      CALL OPILGGE_ai_nl(ap, Angle, FabricGrid, C)
       LGrad = MATMUL( NodalVelo(1:3,1:n), dBasisdx(1:n,1:3) )
 
       StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
@@ -1096,25 +1086,34 @@ CONTAINS
           StrainRate(1, 3) = StrainRate(3, 1)
       END IF
 
-!
-!    Compute deviatoric stresses: 
-!    ----------------------------
-      D(1) = StrainRate(1,1)
-      D(2) = StrainRate(2,2)
-      D(3) = StrainRate(3,3)
-      D(4) = 2. * StrainRate(1,2)
-      D(5) = 2. * StrainRate(2,3)
-      D(6) = 2. * StrainRate(3,1)
-      
       INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
       INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
-      DO k = 1, 2*spoofdim
-       DO j = 1, 2*spoofdim
-        Stress( INDi(k),INDj(k) ) = &
-        Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
-       END DO
-       IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
-      END DO
+
+      call frame(fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
+
+      ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
+      ! symmetry/reflection axes = eigen directions).
+      Eij = Eeiej(fabric, e1,e2,e3, Wn(14), Wn(15), Wn(16), INT(Wn(17)))
+
+      ! A_specfab = 2.0_dp**((Wn(2)-1.0_dp)/2.0_dp)
+      ! Inverse rheology
+
+      do i = 1,3
+        do j = 1,3
+            SR(i,j) = StrainRate(i,j) * 4.0_dp
+        end do
+      end do
+      do i = 1,3
+            SR(i,i) = SR(i,i) / 2.0_dp
+      end do
+      Stress = tau_of_eps__orthotropic__dimless(SR, INT(Wn(2)), e1,e2,e3, Eij)
+      do i = 1,3
+        do j = 1,3
+            if (i.ne.j) then
+                Stress(i,j) = stress(i,j) / 2.0_dp
+            end if
+        end do
+      end do
 
       SStar = 0.0
       TrS = 0.0
