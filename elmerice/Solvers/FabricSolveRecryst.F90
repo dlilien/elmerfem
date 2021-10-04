@@ -102,7 +102,7 @@
      REAL(KIND=dp) :: rho,lambda0,gamma0   !Interaction parameter,diffusion parameter
      REAL(KIND=dp) :: A1plusA2
      Real(KIND=dp), parameter :: Rad2deg=180._dp/Pi
-     REAL(KIND=dp) :: a2(6)
+     REAL(KIND=dp) :: a2e(6)
      REAL(KIND=dp) :: ai(3), Angle(3)
 
      LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
@@ -783,14 +783,14 @@
            NodeIndexes => CurrentElement % NodeIndexes
 
            Do i=1,n
-            a2(1)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+1 )
-            a2(2)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+2 )
-            a2(3)=1.0_dp - a2(1) - a2(2)
-            a2(4)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+3 )
-            a2(5)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+4 )
-            a2(6)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+5 )
+            a2e(1)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+1 )
+            a2e(2)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+2 )
+            a2e(3)=1.0_dp - a2e(1) - a2e(2)
+            a2e(4)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+3 )
+            a2e(5)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+4 )
+            a2e(6)=FabricValues( fab_len*(FabricPerm(NodeIndexes(i))-1)+5 )
 
-            call R2Ro(a2,dim,spoofdim,ai,angle)
+            call R2Ro(a2e,dim,spoofdim,ai,angle)
 
             angle(:)=angle(:)*rad2deg
             If (angle(1).gt.90._dp) angle(1)=angle(1)-180._dp

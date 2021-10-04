@@ -868,7 +868,7 @@ CONTAINS
 
      REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), FW
   
-     REAL(KIND=dp) :: dDispldx(3,3), ai(3), Angle(3), a2full(3, 3), a2(6)
+     REAL(KIND=dp) :: dDispldx(3,3), ai(3), Angle(3), a2full(3, 3), a2e(6)
      TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
 
      INTEGER :: N_Integ
@@ -952,15 +952,15 @@ CONTAINS
                             SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
                             KIND=dp)
         END DO
-        a2full = a2_ij(Fabric)
-        a2(1) = a2full(1, 1)
-        a2(2) = a2full(2, 2)
-        a2(3) = a2full(3, 3)
-        a2(4) = a2full(1, 2)
-        a2(5) = a2full(2, 3)
-        a2(6) = a2full(1, 3)
+        a2full = a2(Fabric)
+        a2e(1) = a2full(1, 1)
+        a2e(2) = a2full(2, 2)
+        a2e(3) = a2full(3, 3)
+        a2e(4) = a2full(1, 2)
+        a2e(5) = a2full(2, 3)
+        a2e(6) = a2full(1, 3)
       
-         CALL R2Ro(a2,dim,dim,ai,angle)
+         CALL R2Ro(a2e,dim,dim,ai,angle)
          CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
 ! else use isotropic law
       ELSE
@@ -1334,7 +1334,7 @@ CONTAINS
 !------------------------------------------------------------------------------
      LOGICAL :: stat
      INTEGER :: i,j,k,p,q
-     REAL(KIND=dp) :: LGrad(3,3), Radius, Temp, ai(3), Angle(3),a2full(3,3),a2(6)
+     REAL(KIND=dp) :: LGrad(3,3), Radius, Temp, ai(3), Angle(3),a2full(3,3),a2e(6)
      REAL(KIND=dp) :: C(6,6), epsi
      Real(kind=dp) :: Bg, BGlenT, ss, nn
      COMPLEX(kind=dp) :: Fabric(nlm_len)
@@ -1420,15 +1420,15 @@ CONTAINS
                             SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
                             KIND=dp)
         END DO
-        a2full = a2_ij(Fabric)
-        a2(1) = a2full(1, 1)
-        a2(2) = a2full(2, 2)
-        a2(3) = a2full(3, 3)
-        a2(4) = a2full(1, 2)
-        a2(5) = a2full(2, 3)
-        a2(6) = a2full(1, 3)
+        a2full = a2(Fabric)
+        a2e(1) = a2full(1, 1)
+        a2e(2) = a2full(2, 2)
+        a2e(3) = a2full(3, 3)
+        a2e(4) = a2full(1, 2)
+        a2e(5) = a2full(2, 3)
+        a2e(6) = a2full(1, 3)
       
-        CALL R2Ro(a2,dim,dim,ai,Angle)
+        CALL R2Ro(a2e,dim,dim,ai,Angle)
         CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
          
 !

@@ -90,7 +90,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
                  dim,n1,n2,i,j,k,l,n,nd,t,iter,NDeg,STDOFs,LocalNodes,istat,&
                  comp, SpectralDim,INDi(6),INDj(6)
       REAL(KIND=dp) :: rho, lambda, A1plusA2, Bu, Bv, Bw, &
-           a2(6), ai(3), Angle(3), RM(3,3), &
+           a2e(6), ai(3), Angle(3), RM(3,3), &
            SaveTime = -1, RelativeChange,UNorm,PrevUNorm,Gravity(3), &
            Tdiff,Normal(3),NewtonTol,NonlinearTol,s,OverlapMatrix,&
            C2(3,3)
@@ -596,7 +596,7 @@ RECURSIVE SUBROUTINE SpectralFabricSolver( Model,Solver,dt,TransientSimulation )
       DO i=1,Solver % Mesh % NumberOfNodes
         IF (ExportFabric.OR.ExportEigV) THEN
           FabOut = CMPLX(FabricValues(SpectralDim*(i - 1) + 1:SpectralDim*i))
-          C2 = A2_ij(FabOut)
+          C2 = a2(FabOut)
           ! C2 = reshape((/ 0.33, 0.0, 0.0, 0.0, 0.33, 0.0, 0.0, 0.0, 0.33 /), shape(C2))
 
         END IF
