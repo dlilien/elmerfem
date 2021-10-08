@@ -79,7 +79,7 @@
      TYPE(Element_t),POINTER :: CurrentElement
 
      REAL(KIND=dp) :: RelativeChange, UNorm, PrevUNorm, Gravity(3), &
-         Normal(3), NewtonTol, NonlinearTol, s, Wn(7), MinSRInvariant
+         Normal(3), NewtonTol, NonlinearTol, s, Wn(11), MinSRInvariant
          
 
      REAL(KIND=dp)  :: NodalStresses(3,3), &
@@ -144,7 +144,7 @@
      REAL(KIND=dp) :: Bu, Bv, Bw, RM(3,3)
      REAL(KIND=dp), POINTER :: BoundaryNormals(:,:), &
          BoundaryTangent1(:,:), BoundaryTangent2(:,:)
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, FabVarName
+     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, FabVarName, SolverName
      REAL(KIND=dp) :: Radius
 
 #ifdef USE_ISO_C_BINDINGS
@@ -163,7 +163,10 @@
        NodalAIFlow, LocalFabric, Wn, MinSRInvariant, old_body, &
        LocalFluidity, FabDOFs
 
-     SAVE RefD, RefS, RefSpin, LocalVelo, SlipCoeff, LCap, fab_len
+     SAVE RefD, RefS, RefSpin, LocalVelo, SlipCoeff, LCap, fab_len, SolverName
+
+     SolverName = 'AIFlowSolve_Spectral'
+
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
@@ -171,11 +174,11 @@
       IF (.NOT.GotIt) THEN
         WRITE(Message,'(A)') 'VariableGas Constant  not found. &
                      &Setting to 8.314'
-        CALL INFO('AIFlowSolve', Message, level=20)
+        CALL INFO(SolverName, Message, level=20)
         Wn(7) = 8.314
       ELSE
         WRITE(Message,'(A,F10.4)') 'Gas Constant = ',   Wn(7)
-        CALL INFO('AIFlowSolve', Message , level = 20)
+        CALL INFO(SolverName, Message , level = 20)
       END IF
 
 !------------------------------------------------------------------------------
@@ -202,7 +205,7 @@
         Temperature => TempSol % Values
       END IF
       WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
-      CALL INFO('AIFlowSolve', Message , level = 20)
+      CALL INFO(SolverName, Message , level = 20)
 
       IF (FIRSTTIME) THEN
         LCap = ListGetInteger( SolverParams, 'LCap', GotIt, UnfoundFatal=.TRUE.)
@@ -297,7 +300,7 @@
                  SlipCoeff(3,N), LocalFluidity(N), STAT=istat )
 
        IF ( istat /= 0 ) THEN
-          CALL Fatal( 'AIFlowSolve', 'Memory allocation error.' )
+          CALL Fatal( SolverName, 'Memory allocation error.' )
        END IF
 !------------------------------------------------------------------------------
 
@@ -336,16 +339,16 @@
        at  = CPUTime()
        at0 = RealTime()
 
-       CALL Info( 'AIFlowSolve', ' ', Level=4 )
-       CALL Info( 'AIFlowSolve', ' ', Level=4 )
-       CALL Info( 'AIFlowSolve', &
+       CALL Info( SolverName, ' ', Level=4 )
+       CALL Info( SolverName, ' ', Level=4 )
+       CALL Info( SolverName, &
                    '-------------------------------------',Level=4 )
        WRITE( Message, * ) 'ANISOTROPIC FLOW SOLVER ITERATION', iter
-       CALL Info( 'AIFlowSolve', Message,Level=4 )
-       CALL Info( 'AIFlowSolve', &
+       CALL Info( SolverName, Message,Level=4 )
+       CALL Info( SolverName, &
                    '-------------------------------------',Level=4 )
-       CALL Info( 'AIFlowSolve', ' ', Level=4 )
-       CALL Info( 'AIFlowSolve', 'Starting assembly...',Level=4 )
+       CALL Info( SolverName, ' ', Level=4 )
+       CALL Info( SolverName, 'Starting assembly...',Level=4 )
 !------------------------------------------------------------------------------
        CALL DefaultInitialize()
 !------------------------------------------------------------------------------
@@ -355,7 +358,7 @@
            WRITE(Message,'(a,i3,a)' ) '   Assembly: ',  &
              INT(100.0 - 100.0 * (Solver % NumberOfActiveElements-t) / &
              (1.0*Solver % NumberOfActiveElements)), ' % done'
-           CALL Info( 'AIFlowSolve', Message, Level=5 )
+           CALL Info( SolverName, Message, Level=5 )
            at0 = RealTime()
          END IF
 
@@ -456,7 +459,7 @@
          CALL DefaultUpdateEquations( LocalStiffMatrix, LocalForce )
       END DO
 
-      CALL Info( 'AIFlowSolve', 'Assembly done', Level=4 )
+      CALL Info( SolverName, 'Assembly done', Level=4 )
 
 !------------------------------------------------------------------------------
 !     Neumann & Newton boundary conditions
@@ -547,7 +550,7 @@
       CALL DefaultDirichletBCs()
 !------------------------------------------------------------------------------
 
-      CALL Info( 'AIFlowSolve', 'Set boundaries done', Level=4 )
+      CALL Info( SolverName, 'Set boundaries done', Level=4 )
 
 !------------------------------------------------------------------------------
 !     Solve the system and check for convergence
@@ -563,9 +566,9 @@
       END IF
 
       WRITE( Message, * ) 'Result Norm   : ',UNorm, PrevUNorm
-      CALL Info( 'AIFlowSolve', Message, Level=4 )
+      CALL Info( SolverName, Message, Level=4 )
       WRITE( Message, * ) 'Relative Change : ',RelativeChange
-      CALL Info( 'AIFlowSolve', Message, Level=4 )
+      CALL Info( SolverName, Message, Level=4 )
 
 !------------------------------------------------------------------------------
       IF ( RelativeChange < NewtonTol .OR. &
@@ -766,12 +769,12 @@ CONTAINS
       IF (.NOT.Gotit) Then
           Isotropic = .False.
            WRITE(Message,'(A)') 'Isotropic set to False'
-           CALL INFO('AIFlowSolve', Message, Level = 20)
+           CALL INFO(SolverName, Message, Level = 20)
       ELSE
            IF ( (ASSOCIATED( FabricVariable )).AND.Isotropic ) Then
               WRITE(Message,'(A)') 'Be careful Isotropic is true &
                            & and Fabric is defined!'
-              CALL INFO('AIFlowSolve', Message, Level = 1)
+              CALL INFO(SolverName, Message, Level = 1)
            END IF
       END IF
 
@@ -788,27 +791,47 @@ CONTAINS
       Wn(2) = ListGetConstReal( Material , 'Powerlaw Exponent', GotIt,UnFoundFatal=UnFoundFatal)
          !Previous default value: Wn(2) = 1.0
       WRITE(Message,'(A,F10.4)') 'Powerlaw Exponent = ',   Wn(2)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO(SolverName, Message, Level = 20)
 
       Wn(3) = ListGetConstReal( Material, 'Activation Energy 1', GotIt,UnFoundFatal=UnFoundFatal)
          !Previous default value: Wn(3) = 1.0
       WRITE(Message,'(A,F10.4)') 'Activation Energy 1 = ',   Wn(3)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO(SolverName, Message, Level = 20)
 
       Wn(4) = ListGetConstReal( Material, 'Activation Energy 2', GotIt,UnFoundFatal=UnFoundFatal)
          !Previous default value: Wn(4) = 1.0
       WRITE(Message,'(A,F10.4)') 'Activation Energy 2 = ',   Wn(4)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO(SolverName, Message, Level = 20)
 
       Wn(5) = ListGetConstReal(Material, 'Reference Temperature', GotIt,UnFoundFatal=UnFoundFatal)
          !Previous default value: Wn(5) = -10.0 (Celsius)
       WRITE(Message,'(A,F10.4)') 'Reference Temperature = ',   Wn(5)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO(SolverName, Message, Level = 20)
 
       Wn(6) = ListGetConstReal( Material, 'Limit Temperature', GotIt,UnFoundFatal=UnFoundFatal)
          !Previous default value: Wn(6) = -10.0 (Celsius)
       WRITE(Message,'(A,F10.4)') 'Limit Temperature = ',   Wn(6)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO(SolverName, Message, Level = 20)
+
+      Wn(8) = ListGetConstReal( Material, 'Ecc', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(8) = 1.0d0
+      END IF
+
+      Wn(9) = ListGetConstReal( Material, 'Eca', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(9) = 1.0d3
+      END IF
+
+      Wn(10) = ListGetConstReal( Material, 'Rheology alpha', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(10) = 0.0125
+      END IF
+
+      Wn(11) = ListGetInteger( Material, 'Grain exponent', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        Wn(11) = 1
+      END IF
 
 ! Get the Minimum value of the Effective Strain rate 
       MinSRInvariant = 100.0*AEPS
@@ -819,10 +842,10 @@ CONTAINS
         IF (.NOT.GotIt) THEN
           WRITE(Message,'(A)') 'Variable Min Second Invariant not &
                     &found. Setting to 100.0*AEPS )'
-          CALL INFO('AIFlowSolve', Message, Level = 20)
+          CALL INFO(SolverName, Message, Level = 20)
         ELSE
           WRITE(Message,'(A,E14.8)') 'Min Second Invariant = ', MinSRInvariant
-          CALL INFO('AIFlowSolve', Message, Level = 20)
+          CALL INFO(SolverName, Message, Level = 20)
         END IF
       END IF
 
@@ -840,7 +863,7 @@ CONTAINS
 
      REAL(KIND=dp) :: StiffMatrix(:,:), MassMatrix(:,:)
      REAL(KIND=dp) :: LoadVector(:,:), NodalVelo(:,:)
-     REAL(KIND=dp) :: Wn(7), MinSRInvariant
+     REAL(KIND=dp) :: Wn(11), MinSRInvariant
      REAL(KIND=dp), DIMENSION(:) :: ForceVector, NodalTemperature, &
              NodalFluidity, NodalFlowWidth
      REAL(KIND=dp), DIMENSION(:, :) :: NodalFabric
@@ -860,7 +883,7 @@ CONTAINS
 
      REAL(KIND=dp), DIMENSION(4,4) :: A,M
      REAL(KIND=dp) :: Load(3),Temperature,  C(6,6)
-     REAL(KIND=dp) :: nn, ss,pp, LGrad(3,3), SR(3,3), Stress(3,3), D(6), epsi
+     REAL(KIND=dp) :: nn, ss,pp, LGrad(3,3), SR(3,3), Stress(3,3), StrainRate(3,3), D(6), epsi
 	 INTEGER :: INDi(6),INDj(6)
 
 
@@ -876,6 +899,10 @@ CONTAINS
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
 
      LOGICAL :: stat
+
+     ! For orthotropic rheology
+     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+     REAL(KIND=dp) :: A_specfab
 
      INTERFACE
       Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
@@ -915,6 +942,7 @@ CONTAINS
 !
 !   Now we start integrating
 !
+
       DO t=1,N_Integ
 
       u = U_Integ(t)
@@ -952,16 +980,7 @@ CONTAINS
                             SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
                             KIND=dp)
         END DO
-        a2full = a2(Fabric)
-        a2e(1) = a2full(1, 1)
-        a2e(2) = a2full(2, 2)
-        a2e(3) = a2full(3, 3)
-        a2e(4) = a2full(1, 2)
-        a2e(5) = a2full(2, 3)
-        a2e(6) = a2full(1, 3)
-      
-         CALL R2Ro(a2e,dim,dim,ai,angle)
-         CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
+
 ! else use isotropic law
       ELSE
           Do i=1,3
@@ -982,8 +1001,7 @@ CONTAINS
 ! -----------------------------
 
       IF ( Wn(2) > 1.0 ) THEN
-
-         Bg=Bg**(1.0/Wn(2))
+        Bg=Bg**(1.0/Wn(2))
 
         LGrad = MATMUL( NodalVelo(:,1:n), dBasisdx(1:n,:) )
         SR = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
@@ -1010,7 +1028,6 @@ CONTAINS
 
     ! Compute the invariant 
         nn = (1.0 - Wn(2))/(2.0*Wn(2))
-
      IF (.NOT.ISOTROPIC) then  ! non linear and anisotropic
         D(1) = SR(1,1)
         D(2) = SR(2,2)
@@ -1021,7 +1038,15 @@ CONTAINS
       
         INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
         INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
-        Stress = 0.
+      ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
+      ! symmetry/reflection axes = eigen directions).
+      call frame(fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
+      Eij = Eeiej(fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+
+      ! Get C and A_specfab, the enhancement of A relative to A_glen
+      CALL Cmat_inverse_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, A_specfab, C)
+
+      Stress = 0.
         DO k = 1, 2*dim
          DO j = 1, 2*dim
           Stress( INDi(k),INDj(k) ) = &
@@ -1029,6 +1054,7 @@ CONTAINS
          END DO
          IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
         END DO 
+
         ss = 0.0_dp
         pp=0._dp
         DO i = 1, 3
@@ -1054,8 +1080,10 @@ CONTAINS
 
       END IF
 
+      write(*,*) ss, A_specfab
+
 ! Non relative viscosity matrix
-       C = C * ss/Bg
+       C = C * A_specfab/Bg
 
 !
 !    Loop over basis functions (of both unknowns and weights)
@@ -1326,7 +1354,7 @@ CONTAINS
      REAL(KIND=dp) :: detJ
      REAL(KIND=dp) :: NodalFabric(:,:)
      REAL(KIND=dp) :: u, v, w      
-     REAL(KIND=dp) :: Wn(7),  D(6), MinSRInvariant
+     REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant
      LOGICAL :: Isotropic,VariableFlowWidth, VariableLocalFlowWidth
       
      TYPE(Nodes_t) :: Nodes
@@ -1335,28 +1363,11 @@ CONTAINS
      LOGICAL :: stat
      INTEGER :: i,j,k,p,q
      REAL(KIND=dp) :: LGrad(3,3), Radius, Temp, ai(3), Angle(3),a2full(3,3),a2e(6)
-     REAL(KIND=dp) :: C(6,6), epsi
+     REAL(KIND=dp) :: epsi
      Real(kind=dp) :: Bg, BGlenT, ss, nn
      COMPLEX(kind=dp) :: Fabric(nlm_len)
 !------------------------------------------------------------------------------
-     INTERFACE
-      Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
-         USE Types
-         REAL(KIND=dp),intent(in) :: a2(6)
-         Integer :: dim,spoofdim
-         REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
-      End Subroutine R2Ro
-                 
-      Subroutine OPILGGE_ai_nl(ai,Angle,etaI,eta36)
-          USE Types
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: ai
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: Angle
-          REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
-          REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
-        END SUBROUTINE OPILGGE_ai_nl
-      END INTERFACE
-!------------------------------------------------------------------------------
-     
+     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
 !
 !     Temperature at the integration point
       Temp = SUM( NodalTemp(1:n)*Basis(1:n) )
@@ -1371,7 +1382,6 @@ CONTAINS
 !    -------------------
 
       LGrad = MATMUL( NodalVelo(:,1:n), dBasisdx(1:n,:) )
-      
       StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
 
       IF ( VariableFlowWidth ) THEN
@@ -1404,57 +1414,40 @@ CONTAINS
       END IF
 
 !
-!    Compute Spin : 
-!    --------------
-
-        Spin = 0.5 * ( LGrad - TRANSPOSE(LGrad) )
-
-!
 !    Compute deviatoric stresses: 
 !    ----------------------------
 
-      IF (.Not.Isotropic) then
-	    C = 0.0_dp
-        DO i=1,nlm_len
-          Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
-                            SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
-                            KIND=dp)
-        END DO
-        a2full = a2(Fabric)
-        a2e(1) = a2full(1, 1)
-        a2e(2) = a2full(2, 2)
-        a2e(3) = a2full(3, 3)
-        a2e(4) = a2full(1, 2)
-        a2e(5) = a2full(2, 3)
-        a2e(6) = a2full(1, 3)
-      
-        CALL R2Ro(a2e,dim,dim,ai,Angle)
-        CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
-         
-!
-!    Compute deviatoric stresses: 
-!    ----------------------------
-      D(1) = StrainRate(1,1)
-      D(2) = StrainRate(2,2)
-      D(3) = StrainRate(3,3)
-      D(4) = 2. * StrainRate(1,2)
-      D(5) = 2. * StrainRate(2,3)
-      D(6) = 2. * StrainRate(3,1)
-      
-      INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
-      INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
-      DO k = 1, 2*dim
-       DO j = 1, 2*dim
-        Stress( INDi(k),INDj(k) ) = &
-        Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
-       END DO
-       IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
-      END DO
+    IF (.Not.Isotropic) then
+        INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
+        INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
+        Stress = 0.
 
+      ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
+      ! symmetry/reflection axes = eigen directions).
+      call frame(fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
+      Eij = Eeiej(fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+
+      ! A_specfab = 2.0_dp**((Wn(2)-1.0_dp)/2.0_dp)
+      ! Inverse rheology
+      do i = 1,3
+        do j = 1,3
+            StrainRate(i,j) = StrainRate(i,j) * 4.0_dp
+        end do
+      end do
+      do i = 1,3
+            StrainRate(i,i) = StrainRate(i,i) / 2.0_dp
+      end do
+      Stress = tau_of_eps__orthotropic__dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij)
+      do i = 1,3
+        do j = 1,3
+            if (i.ne.j) then
+                Stress(i,j) = stress(i,j) / 2.0_dp
+            end if
+        end do
+      end do
 	ELSE  ! ISOTROPIC CASE
 	     Stress=2._dp * StrainRate
 	END IF
-	   
 
 ! non relative viscosities
     ! Glen fluidity       
@@ -1474,14 +1467,8 @@ CONTAINS
         ss = (ss / 2.0)**nn
          
         IF (ss < MinSRInvariant ) ss = MinSRInvariant
-        
-		
       END IF
-       
 	   Stress=Stress*ss/Bg
-
-
-
 !------------------------------------------------------------------------------
       END SUBROUTINE LocalSD      
 !------------------------------------------------------------------------------

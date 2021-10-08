@@ -841,42 +841,42 @@ CONTAINS
        IF (.NOT.GotIt) THEN
            WRITE(Message,'(A)') 'Interaction  Parameter notfound. &
                          &Setting to the value in ViscosityFile'
-           CALL INFO('AIFlowSolve', Message, Level = 20)
+           CALL INFO('FabricSolveSpectral', Message, Level = 20)
            rho = FabricGrid(4879)
        ELSE
            WRITE(Message,'(A,F10.4)') 'Interaction Parameter = ', rho
-           CALL INFO('AIFlowSolve', Message, Level = 20)
+           CALL INFO('FabricSolveSpectral', Message, Level = 20)
        END IF
 
        lambda0 = ListGetConstReal( Material, 'Diffusion Intercept', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: lambda = 0.0_dp
       WRITE(Message,'(A,F10.4)') 'Diffusion Intercept = ', lambda0
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(2) = ListGetConstReal( Material , 'Powerlaw Exponent', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: Wn(2) = 1.0
       WRITE(Message,'(A,F10.4)') 'Powerlaw Exponent = ',   Wn(2)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(3) = ListGetConstReal( Material, 'Activation Energy 1', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: Wn(3) = 1.0
       WRITE(Message,'(A,F10.4)') 'Activation Energy 1 = ',   Wn(3)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(4) = ListGetConstReal( Material, 'Activation Energy 2', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: Wn(4) = 1.0
       WRITE(Message,'(A,F10.4)') 'Activation Energy 2 = ',   Wn(4)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(5) = ListGetConstReal(Material, 'Reference Temperature', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: Wn(5) = -10.0
       WRITE(Message,'(A,F10.4)') 'Reference Temperature = ',   Wn(5)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(6) = ListGetConstReal( Material, 'Limit Temperature', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: Wn(6) = -10.0
       WRITE(Message,'(A,F10.4)') 'Limit Temperature = ',   Wn(6)
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
 
       Wn(8) = ListGetConstReal( Material, 'Migration A', GotIt,UnFoundFatal=.FALSE.)
@@ -885,10 +885,10 @@ CONTAINS
         Wn(8) = 0.0_dp
         WRITE(Message,'(A,F10.4)') &
             'Migration A unfound, taken to be ',   Wn(8)
-        CALL INFO('AIFlowSolve', Message, Level = 3)
+        CALL INFO('FabricSolveSpectral', Message, Level = 3)
       ELSE
         WRITE(Message,'(A,F10.4)') 'Migration Gamma = ',   Wn(8)
-        CALL INFO('AIFlowSolve', Message, Level = 20)
+        CALL INFO('FabricSolveSpectral', Message, Level = 20)
       END IF
 
       Wn(9) = ListGetConstReal( Material, 'Lattice Rotation', GotIt,UnFoundFatal=.FALSE.)
@@ -896,10 +896,10 @@ CONTAINS
         Wn(9) = 1.0_dp
         WRITE(Message,'(A,F10.4)') &
             'Lattice Rotation unfound, assumed active'
-        CALL INFO('AIFlowSolve', Message, Level = 3)
+        CALL INFO('FabricSolveSpectral', Message, Level = 3)
       ELSE
         WRITE(Message,'(A,F10.4)') 'Lattice Rotation = ',   Wn(9)
-        CALL INFO('AIFlowSolve', Message, Level = 20)
+        CALL INFO('FabricSolveSpectral', Message, Level = 20)
       END IF
 
       Wn(10) = ListGetConstReal( Material, 'Diffusion Temp Dependence', GotIt,UnFoundFatal=.FALSE.)
@@ -907,7 +907,7 @@ CONTAINS
         Wn(10) = 0.0_dp
         WRITE(Message,'(A,F10.4)') &
             'Diffusion temp dependence unfound, assumed zero'
-        CALL INFO('AIFlowSolve', Message, Level = 3)
+        CALL INFO('FabricSolveSpectral', Message, Level = 3)
       END IF
 
       Wn(11) = ListGetConstReal( Material, 'Max Diffusion', GotIt,UnFoundFatal=.FALSE.)
@@ -947,7 +947,7 @@ CONTAINS
 
       gamma0 = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
       WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gamma0
-      CALL INFO('AIFlowSolve', Message, Level = 20)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
 !------------------------------------------------------------------------------
       END SUBROUTINE GetMaterialDefs
