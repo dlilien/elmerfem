@@ -903,24 +903,6 @@ CONTAINS
      ! For orthotropic rheology
      REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
 
-     INTERFACE
-      Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
-         USE Types
-         REAL(KIND=dp),intent(in) :: a2(6)
-         Integer :: dim,spoofdim
-         REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
-      End Subroutine R2Ro
-                 
-      Subroutine OPILGGE_ai_nl(ai,Angle,etaI,eta36)
-          USE Types
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: ai
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: Angle
-          REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
-          REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
-        END SUBROUTINE OPILGGE_ai_nl
-
-      END INTERFACE
-!------------------------------------------------------------------------------
       dim = CoordinateSystemDimension()
 
       ForceVector = 0.0D0
