@@ -883,7 +883,7 @@ CONTAINS
 
      REAL(KIND=dp), DIMENSION(4,4) :: A,M
      REAL(KIND=dp) :: Load(3),Temperature,  C(6,6)
-     REAL(KIND=dp) :: nn, ss,pp, LGrad(3,3), SR(3,3), Stress(3,3), StrainRate(3,3), D(6), epsi
+     REAL(KIND=dp) :: nn, ss, LGrad(3,3), SR(3,3), Stress(3,3), StrainRate(3,3), D(6), epsi
 	 INTEGER :: INDi(6),INDj(6)
 
 
@@ -902,7 +902,6 @@ CONTAINS
 
      ! For orthotropic rheology
      REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
-     REAL(KIND=dp) :: A_specfab
 
      INTERFACE
       Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
@@ -1043,8 +1042,8 @@ CONTAINS
       call frame(fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
       Eij = Eeiej(fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
 
-      ! Get C and A_specfab, the enhancement of A relative to A_glen
-      CALL Cmat_inverse_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, A_specfab, C)
+      ! Get C and ss, the enhancement of A relative to A_glen
+      CALL Cmat_inverse_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
 
       Stress = 0.
         DO k = 1, 2*dim
@@ -1054,19 +1053,6 @@ CONTAINS
          END DO
          IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
         END DO 
-
-        ss = 0.0_dp
-        pp=0._dp
-        DO i = 1, 3
-          DO j = 1, 3
-            ss = ss + Stress(i,j)**2.
-            pp=pp+SR(i,j)**2.
-          END DO
-        END DO
-        ss=ss/4.       ! pour avoir le meme resultat si Isotropic
-        !if (Radius.lt.2000) write(*,*) ss,pp,Radius
-        IF (ss < MinSRInvariant ) ss = MinSRInvariant
-        ss = (2.*ss)**nn
      Else
         ss = 0.0_dp
         DO i = 1, 3
@@ -1080,10 +1066,8 @@ CONTAINS
 
       END IF
 
-      write(*,*) ss, A_specfab
-
 ! Non relative viscosity matrix
-       C = C * A_specfab/Bg
+       C = C * ss/Bg
 
 !
 !    Loop over basis functions (of both unknowns and weights)
