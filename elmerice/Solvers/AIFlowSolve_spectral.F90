@@ -640,7 +640,7 @@
            LocalTemperature(1:n) = 0.0d0
          END IF
 
-! n nodales values of the 5 fabric parameters, not needed if isotropic
+! n nodales values of the fabric parameters, not needed if isotropic
          IF(.NOT.Isotropic) Then
            DO i=1,fab_len
              LocalFabric(i, 1:n) = FabricValues( fab_len * (FabricPerm(NodeIndexes(1:n))-1) + i ) 
@@ -1320,7 +1320,7 @@ CONTAINS
      REAL(KIND=dp) :: detJ
      REAL(KIND=dp) :: NodalFabric(:,:)
      REAL(KIND=dp) :: u, v, w      
-     REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant
+     REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant, C(6,6)
      LOGICAL :: Isotropic,VariableFlowWidth, VariableLocalFlowWidth
       
      TYPE(Nodes_t) :: Nodes
@@ -1338,6 +1338,13 @@ CONTAINS
 !     Temperature at the integration point
       Temp = SUM( NodalTemp(1:n)*Basis(1:n) )
       Wn(1) = SUM( NodalFluidity(1:n)*Basis(1:n) )
+
+      ! Complex fabric values
+      DO i=1,nlm_len
+        Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
+                          SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
+                          KIND=dp)
+      END DO
 
 
       Stress = 0.0
@@ -1390,51 +1397,36 @@ CONTAINS
 
       ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
       ! symmetry/reflection axes = eigen directions).
-      call frame(fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
-      Eij = Eeiej(fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+      call frame(Fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
+      Eij = Eeiej(Fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
 
-      ! A_specfab = 2.0_dp**((Wn(2)-1.0_dp)/2.0_dp)
-      ! Inverse rheology
-      do i = 1,3
-        do j = 1,3
-            StrainRate(i,j) = StrainRate(i,j) * 4.0_dp
-        end do
-      end do
-      do i = 1,3
-            StrainRate(i,i) = StrainRate(i,i) / 2.0_dp
-      end do
-      Stress = tau_of_eps__orthotropic__dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij)
-      do i = 1,3
-        do j = 1,3
-            if (i.ne.j) then
-                Stress(i,j) = stress(i,j) / 2.0_dp
-            end if
-        end do
-      end do
-	ELSE  ! ISOTROPIC CASE
-	     Stress=2._dp * StrainRate
-	END IF
+      ! Get C and ss, the enhancement of A relative to A_glen
+      CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
 
-! non relative viscosities
-    ! Glen fluidity       
-	 Bg=BGlenT(Temp,Wn)
-	 ss=1.0_dp
-     ! Case Non linear
-	 IF (Wn(2) > 1.0) THEN 
-	   Bg=Bg**(1.0/Wn(2))
-       
         ss = 0.0_dp
         DO i = 1, 3
           DO j = 1, 3
-            ss = ss + Stress(i,j)**2
+            ss = ss + StrainRate(i,j)**2.
           END DO
         END DO
-        nn = (1.0 - Wn(2))/(2.0*Wn(2))
-        ss = (ss / 2.0)**nn
-         
         IF (ss < MinSRInvariant ) ss = MinSRInvariant
+        ss = (2.*ss)**nn
+      Bg = BGlenT(Temp,Wn)
+      Bg = Bg**(1.0/Wn(2))
+! Non relative viscosity matrix
+       C = C * ss/Bg
+
+      Stress = 0.
+        DO k = 1, 2*dim
+         DO j = 1, 2*dim
+          Stress( INDi(k),INDj(k) ) = &
+          Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
+         END DO
+         IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
+        END DO 
+
       END IF
-	   Stress=Stress*ss/Bg
+
 !------------------------------------------------------------------------------
       END SUBROUTINE LocalSD      
 !------------------------------------------------------------------------------
