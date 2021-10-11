@@ -771,6 +771,8 @@
 !  END  Compute the StrainRate and Deviatoric Stress
 !------------------------------------------------------------------------------
     CONTAINS
+
+
       SUBROUTINE GetMaterialDefs()
         ! check if we are isotropic or not
         Isotropic = ListGetLogical( Material , 'Isotropic',Gotit )
@@ -1084,16 +1086,15 @@
           B = 0.0d0
 
           DO p=1,NBasis
+            G = 0.0d0
 
-           G = 0.0d0
-
-           IF ( VariableFlowWidth ) THEN
+            IF ( VariableFlowWidth ) THEN
               G(1,1) = dBasisdx(p,1)
               G(1,3) = Basis(p) / Radius
               G(1,4) = dBasisdx(p,2)
               G(2,2) = dBasisdx(p,2)
               G(2,4) = dBasisdx(p,1)
-           ELSE
+            ELSE
               G(1,1) = dBasisdx(p,1)
               G(2,2) = dBasisdx(p,2)
               G(3,3) = dBasisdx(p,3)
@@ -1103,21 +1104,21 @@
               G(3,5) = dBasisdx(p,2)
               G(1,6) = dBasisdx(p,3)
               G(3,6) = dBasisdx(p,1)
-           END IF
+            END IF
 
-           G = MATMUL( G, C )
+            G = MATMUL( G, C )
      
-           DO q=1,NBasis
+            DO q=1,NBasis
 
-             B = 0.0d0
+              B = 0.0d0
 
-             IF ( VariableFlowWidth ) THEN
+              IF ( VariableFlowWidth ) THEN
                 B(1,1) = dBasisdx(q,1)
                 B(2,2) = dBasisdx(q,2)
                 B(3,1) = Basis(q) / Radius
                 B(4,1) = dBasisdx(q,2)
                 B(4,2) = dBasisdx(q,1)
-             ELSE
+              ELSE
                 B(1,1) = dBasisdx(q,1)
                 B(2,2) = dBasisdx(q,2)
                 B(3,3) = dBasisdx(q,3)
@@ -1127,22 +1128,22 @@
                 B(5,3) = dBasisdx(q,2)
                 B(6,1) = dBasisdx(q,3)
                 B(6,3) = dBasisdx(q,1)
-             END IF
+              END IF
 
-             A(1:3,1:3) = MATMUL( G, B )
+              A(1:3,1:3) = MATMUL( G, B )
 
-    ! Pressure gradient
-             DO i=1,dim
+              ! Pressure gradient
+              DO i=1,dim
                 A(i,dim+1) = -dBasisdx(p,i) * Basis(q)
-             END DO
-             IF ( VariableFlowWidth ) A(1,dim+1) =  A(1,dim+1) - Basis(p) * Basis(q) / Radius
+              END DO
+              IF ( VariableFlowWidth ) A(1,dim+1) =  A(1,dim+1) - Basis(p) * Basis(q) / Radius
 
-    ! Continuity equation:
-             DO i=1,dim
+              ! Continuity equation:
+              DO i=1,dim
                 A(dim+1,i) = dBasisdx(q,i) * Basis(p)
-             END DO
-             IF ( VariableFlowWidth ) A(dim+1,1) =  A(dim+1,1) + Basis(p) * Basis(q) / Radius
-             A(dim+1, dim+1) = 0.0d0
+              END DO
+              IF ( VariableFlowWidth ) A(dim+1,1) =  A(dim+1,1) + Basis(p) * Basis(q) / Radius
+              A(dim+1, dim+1) = 0.0d0
 
               ! Add nodal matrix to element matrix
               DO i=1,dim+1
@@ -1151,7 +1152,7 @@
                         StiffMatrix( (dim+1)*(p-1)+i,(dim+1)*(q-1)+j ) + s*A(i,j)
                 END DO ! j
               END DO ! i
-            END DO
+            END DO  ! q over bases
 
             ! The righthand side...
             Load = 0.0d0
@@ -1163,11 +1164,11 @@
             DO i=1,dim
               ForceVector((dim+1)*(p-1)+i) = ForceVector((dim+1)*(p-1)+i) + s*Load(i)
             END DO
-          END DO
-        END DO 
+          END DO  ! p over Bases
+        END DO  ! Integration Points
       END SUBROUTINE LocalMatrix
 
-!------------------------------------------------------------------------------
+
       SUBROUTINE LocalMatrixBoundary( BoundaryMatrix, BoundaryVector, &
                  LoadVector, NodalAlpha, NodalBeta, NodalSlipCoeff, & 
                  NormalTangential, Element, n, Nodes, &
@@ -1319,180 +1320,167 @@
       END DO
 !------------------------------------------------------------------------------
       END SUBROUTINE LocalMatrixBoundary
-!------------------------------------------------------------------------------
 
 
-!------------------------------------------------------------------------------
-      SUBROUTINE LocalSD( Stress, StrainRate, Spin, &
-        NodalVelo, NodalTemp, NodalFluidity, NodalFlowWidth, &
-        nlm_len, NodalFabric, &
-        Basis, dBasisdx, Element, n,  Nodes, dim,  Wn, MinSRInvariant, &
-        Isotropic, NLRheo, VariableFlowWidth, VariableLocalFlowWidth )
-!------------------------------------------------------------------------------
-!    Subroutine to compute the nodal Strain-Rate, Stress, ...
-!------------------------------------------------------------------------------
-     INTEGER :: n, dim, nlm_len
-     INTEGER :: INDi(6),INDj(6)
-     REAL(KIND=dp) :: Stress(:,:), StrainRate(:,:), Spin(:,:)
-     REAL(KIND=dp) :: NodalVelo(:,:), NodalTemp(:), NodalFluidity(:), &
-                      NodalFlowWidth(:)
-     REAL(KIND=dp) :: Basis(2*n), ddBasisddx(1,1,1)
-     REAL(KIND=dp) :: dBasisdx(2*n,3)
-     REAL(KIND=dp) :: detJ
-     REAL(KIND=dp) :: NodalFabric(:,:)
-     REAL(KIND=dp) :: u, v, w      
-     REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant, C(6,6)
-     LOGICAL :: Isotropic,VariableFlowWidth, VariableLocalFlowWidth, NLRheo
-      
-     TYPE(Nodes_t) :: Nodes
-     TYPE(Element_t) :: Element
-!------------------------------------------------------------------------------
-     LOGICAL :: stat
-     INTEGER :: i,j,k,p,q
-     REAL(KIND=dp) :: LGrad(3,3), Radius, Temp, ai(3), Angle(3),a2full(3,3),a2e(6)
-     REAL(KIND=dp) :: epsi
-     Real(kind=dp) :: Bg, BGlenT, ss, nn
-     COMPLEX(kind=dp) :: Fabric(nlm_len)
+      SUBROUTINE LocalSD( Stress, StrainRate, Spin, NodalVelo, NodalTemp, NodalFluidity, &
+                          NodalFlowWidth, nlm_len, NodalFabric,  Basis, dBasisdx, &
+                          Element, n,  Nodes, dim,  Wn, MinSRInvariant, Isotropic, &
+                          NLRheo, VariableFlowWidth, VariableLocalFlowWidth )
+        ! Subroutine to compute the nodal Strain-Rate, Stress, ...
+        INTEGER :: n, dim, nlm_len
+        INTEGER :: INDi(6),INDj(6)
+        REAL(KIND=dp) :: Stress(:,:), StrainRate(:,:), Spin(:,:)
+        REAL(KIND=dp) :: NodalVelo(:,:), NodalTemp(:), NodalFluidity(:), &
+                         NodalFlowWidth(:)
+        REAL(KIND=dp) :: Basis(2*n), ddBasisddx(1,1,1)
+        REAL(KIND=dp) :: dBasisdx(2*n,3)
+        REAL(KIND=dp) :: detJ
+        REAL(KIND=dp) :: NodalFabric(:,:)
+        REAL(KIND=dp) :: u, v, w      
+        REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant, C(6,6)
+        LOGICAL :: Isotropic,VariableFlowWidth, VariableLocalFlowWidth, NLRheo
+        TYPE(Nodes_t) :: Nodes
+        TYPE(Element_t) :: Element
+        LOGICAL :: stat
+        INTEGER :: i,j,k,p,q
+        REAL(KIND=dp) :: LGrad(3,3), Radius, Temp, ai(3), Angle(3),a2full(3,3),a2e(6)
+        REAL(KIND=dp) :: epsi
+        REAL(kind=dp) :: Bg, BGlenT, ss, nn
+        COMPLEX(kind=dp) :: Fabric(nlm_len)
 
-     ! For full nonlinear orthotropic rheology
-!------------------------------------------------------------------------------
-     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+        ! For full nonlinear orthotropic rheology
+        REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
 
-     ! For GOLF
-!------------------------------------------------------------------------------
-     INTERFACE
-      Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
-         USE Types
-         REAL(KIND=dp),intent(in) :: a2(6)
-         Integer :: dim,spoofdim
-         REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
-      End Subroutine R2Ro
-                 
-      Subroutine OPILGGE_ai_nl(ai,Angle,etaI,eta36)
-          USE Types
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: ai
-          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: Angle
-          REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
-          REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
-        END SUBROUTINE OPILGGE_ai_nl
-      END INTERFACE
-!------------------------------------------------------------------------------
-!
-!     Temperature at the integration point and resulting fluidity
-      Temp = SUM( NodalTemp(1:n)*Basis(1:n) )
-      Wn(1) = SUM( NodalFluidity(1:n)*Basis(1:n) )
-      Bg = BGlenT(Temp,Wn)
-      Bg = Bg**(1.0/Wn(2))
+        INTERFACE
+          Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
+             USE Types
+             REAL(KIND=dp),intent(in) :: a2(6)
+             Integer :: dim,spoofdim
+             REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
+          End Subroutine R2Ro
+                     
+          Subroutine OPILGGE_ai_nl(ai,Angle,etaI,eta36)
+              USE Types
+              REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: ai
+              REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: Angle
+              REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
+              REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
+            END SUBROUTINE OPILGGE_ai_nl
+        END INTERFACE
 
-      Stress = 0.0
-      StrainRate = 0.0
-      Spin = 0.0
-!
-!    Compute strainRate : 
-!    -------------------
+        ! Temperature at the integration point and resulting fluidity
+        Temp = SUM( NodalTemp(1:n)*Basis(1:n) )
+        Wn(1) = SUM( NodalFluidity(1:n)*Basis(1:n) )
+        Bg = BGlenT(Temp,Wn)
+        Bg = Bg**(1.0/Wn(2))
 
-      LGrad = MATMUL( NodalVelo(:,1:n), dBasisdx(1:n,:) )
-      StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
+        Stress = 0.0
+        StrainRate = 0.0
+        Spin = 0.0
 
-      IF ( VariableFlowWidth ) THEN
+        LGrad = MATMUL( NodalVelo(:,1:n), dBasisdx(1:n,:) )
+        StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
+        Spin = 0.5 * ( LGrad - TRANSPOSE(LGrad) )
 
-        StrainRate(1,3) = 0.0
-        StrainRate(2,3) = 0.0
-        StrainRate(3,1) = 0.0
-        StrainRate(3,2) = 0.0
-        StrainRate(3,3) = 0.0
+        IF ( VariableFlowWidth ) THEN
+          StrainRate(1,3) = 0.0
+          StrainRate(2,3) = 0.0
+          StrainRate(3,1) = 0.0
+          StrainRate(3,2) = 0.0
+          StrainRate(3,3) = 0.0
         
-        IF (SUM( NodalFlowWidth(1:n) * dBasisdx(1:n,1)) == 0) THEN
-              Radius = 10e7
-        ELSE
-                Radius = SUM( NodalFlowWidth(1:n) * Basis(1:n) ) / &
-                (SUM( NodalFlowWidth(1:n) * dBasisdx(1:n,1)) )
-        END IF
-        
-        IF ( Radius > 10*AEPS ) THEN
-         StrainRate(3,3) = SUM( Nodalvelo(1,1:n) * Basis(1:n) ) / Radius
-        END IF
-        epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
-        DO i=1,3   
-          StrainRate(i,i) = StrainRate(i,i) - epsi/3.0
-        END DO
-      ELSE
-        epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
-        DO i=1,dim 
-          StrainRate(i,i) = StrainRate(i,i) - epsi/dim
-        END DO
-      END IF
-
-      ss = 1.0_dp  ! Default value if Wn(2) == 1
-      
-      ! Get the dimensionless C and the effective stress (to the required exponent)
-      IF (.Not.Isotropic) then
-        ! Complex fabric values
-        DO i=1,nlm_len
-          Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
-                            SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
-                            KIND=dp)
-        END DO
-
-        INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
-        INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
-        Stress = 0.
-        IF (NLRheo) THEN
-          ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
-          ! symmetry/reflection axes = eigen directions).
-          CALL frame(Fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
-          Eij = Eeiej(Fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
-
-          ! Get C and ss, the enhancement of A relative to A_glen
-          CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
-        ELSE
-          a2full = a2(Fabric)
-          a2e(1) = a2full(1, 1)
-          a2e(2) = a2full(2, 2)
-          a2e(3) = a2full(3, 3)
-          a2e(4) = a2full(1, 2)
-          a2e(5) = a2full(2, 3)
-          a2e(6) = a2full(1, 3)
-      
-          CALL R2Ro(a2e,dim,dim,ai,Angle)
-          CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
-
-          ! This is rolled into Cmat if we use the fully nonlinear orthotropic
-          ! version
-	      IF (Wn(2) > 1.0) THEN 
-            ss = 0.0_dp
-            DO i = 1, 3
-              DO j = 1, 3
-                ss = ss + StrainRate(i,j)**2
-              END DO
-            END DO
-            nn = (1.0 - Wn(2))/(2.0*Wn(2))
-            ss = (ss / 2.0)**nn
-            IF (ss < MinSRInvariant ) ss = MinSRInvariant
+          IF (SUM( NodalFlowWidth(1:n) * dBasisdx(1:n,1)) == 0) THEN
+            Radius = 10e7
+          ELSE
+            Radius = SUM( NodalFlowWidth(1:n) * Basis(1:n) ) / &
+                     (SUM( NodalFlowWidth(1:n) * dBasisdx(1:n,1)) )
           END IF
-        END IF ! NLRheo
-      ELSE
-        ! Simple diagonal C if not isotropic
-        DO i=1,3
-          C(i,i)=2.0_dp 
-        END DO
-        DO i=4,6
-          C(i,i)=1.0_dp
-        END DO
-      END IF ! Isotropic
+        
+          IF ( Radius > 10*AEPS ) THEN
+            StrainRate(3,3) = SUM( Nodalvelo(1,1:n) * Basis(1:n) ) / Radius
+          END IF
+          epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
+          DO i=1,3   
+            StrainRate(i,i) = StrainRate(i,i) - epsi/3.0
+          END DO
+        ELSE
+          epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
+          DO i=1,dim 
+            StrainRate(i,i) = StrainRate(i,i) - epsi/dim
+          END DO
+        END IF
 
-      ! Non relative viscosity matrix
-      C = C * ss / Bg
+        ss = 1.0_dp  ! Default value if Wn(2) == 1
+      
+        ! Get the dimensionless C and the effective stress (to the required exponent)
+        IF (.Not.Isotropic) then
+          ! Complex fabric values
+          DO i=1,nlm_len
+            Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
+                              SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
+                              KIND=dp)
+          END DO
 
-      ! Calculate the stress
-      Stress = 0.
-      DO k = 1, 2*dim
-        DO j = 1, 2*dim
-          Stress( INDi(k),INDj(k) ) = &
-          Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
-        END DO
-        IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
-       END DO 
+          INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
+          INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
+          Stress = 0.
+          IF (NLRheo) THEN
+            ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
+            ! symmetry/reflection axes = eigen directions).
+            CALL frame(Fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
+            Eij = Eeiej(Fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+
+            ! Get C and ss, the enhancement of A relative to A_glen
+            CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
+          ELSE ! GOLF
+            a2full = a2(Fabric)
+            a2e(1) = a2full(1, 1)
+            a2e(2) = a2full(2, 2)
+            a2e(3) = a2full(3, 3)
+            a2e(4) = a2full(1, 2)
+            a2e(5) = a2full(2, 3)
+            a2e(6) = a2full(1, 3)
+         
+            CALL R2Ro(a2e,dim,dim,ai,Angle)
+            CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
+
+            ! This is rolled into Cmat if we use the fully nonlinear orthotropic
+            ! version
+            IF (Wn(2) > 1.0) THEN 
+              ss = 0.0_dp
+              DO i = 1, 3
+                DO j = 1, 3
+                  ss = ss + StrainRate(i,j)**2
+                END DO
+              END DO
+              nn = (1.0 - Wn(2))/(2.0*Wn(2))
+              ss = (ss / 2.0)**nn
+              IF (ss < MinSRInvariant ) ss = MinSRInvariant
+            END IF
+          END IF ! NLRheo
+        ELSE  ! Isotropic
+          ! Simple diagonal C if isotropic
+          DO i=1,3
+            C(i,i)=2.0_dp 
+          END DO
+          DO i=4,6
+            C(i,i)=1.0_dp
+          END DO
+        END IF ! Isotropic
+
+        ! Non relative viscosity matrix
+        C = C * ss / Bg
+
+        ! Calculate the stress
+        Stress = 0.
+        DO k = 1, 2*dim
+          DO j = 1, 2*dim
+            Stress( INDi(k),INDj(k) ) = &
+            Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
+          END DO
+          IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
+        END DO 
       END SUBROUTINE LocalSD      
+
 
       END SUBROUTINE AIFlowSolver_spectral
