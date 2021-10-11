@@ -90,7 +90,7 @@
      REAL(KIND=dp) :: u,v,w,detJ
      
      LOGICAL :: stat, CSymmetry = .FALSE., VariableFlowWidth = .FALSE., &
-            VariableLocalFlowWidth, FirstTime=.TRUE.
+            VariableLocalFlowWidth, FirstTime=.TRUE., NLRheo
        
      INTEGER, PARAMETER :: INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /) ,&
            INDj(1:6)=(/ 1, 2, 3, 2, 3, 1 /)
@@ -161,7 +161,7 @@
        LocalForce, ElementNodes, Alpha, Beta, LocalTemperature, LocalFlowWidth, &
        Isotropic,AllocationsDone,ReferenceTemperature,BoundaryDispl, &
        NodalAIFlow, LocalFabric, Wn, MinSRInvariant, old_body, &
-       LocalFluidity, FabDOFs
+       LocalFluidity, FabDOFs, NLRheo, TempVar, FabVarName
 
      SAVE RefD, RefS, RefSpin, LocalVelo, SlipCoeff, LCap, fab_len, SolverName
 
@@ -195,28 +195,38 @@
       IF ( LocalNodes <= 0 ) RETURN
 
       SolverParams => GetSolverParams()
-      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal )
-      IF (.NOT.GotIt) THEN
-          TempVar = 'Temperature'
-      END IF
-      TempSol => VariableGet( Solver % Mesh % Variables, TempVar )
-      IF ( ASSOCIATED( TempSol) ) THEN
-        TempPerm    => TempSol % Perm
-        Temperature => TempSol % Values
-      END IF
-      WRITE(Message,'(A,A)') 'Temperature variable = ', TempVar
-      CALL INFO(SolverName, Message , level = 20)
 
       IF (FIRSTTIME) THEN
         LCap = ListGetInteger( SolverParams, 'LCap', GotIt, UnfoundFatal=.TRUE.)
         fab_len = 2 * sum([(1+i*2, i=0, Lcap,2)])
         CALL initspecfab(Lcap)
+
+        NLRheo = ListGetLogical( SolverParams,'Nonlinear Rheology',GotIt,.FALSE. )
+        IF (.NOT.GotIt) THEN
+          WRITE(Message,'(A)') 'Assuming full orthotropic nonlinear rheology'
+          CALL INFO(SolverName, Message , level = 3)
+        END IF
+
+        TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal )
+        IF (.NOT.GotIt) THEN
+          TempVar = 'Temperature'
+          WRITE(Message,'(A,A)') 'Temperature Solution Name unfound, assuming ', TempVar
+          CALL INFO(SolverName, Message , level = 3)
+        END IF
+
+        FabVarName = ListGetString( SolverParams,'Fabric Name',GotIt,.FALSE. )
+        IF (.NOT.GotIt) THEN
+          FabVarName = 'Fabric'
+          WRITE(Message,'(A,A)') 'Fabric Name unfound, assuming ', FabVarName
+          CALL INFO(SolverName, Message , level = 3)
+        END IF
         FIRSTTIME = .FALSE.
       END IF
 
-      FabVarName = ListGetString( SolverParams,'Fabric Name',GotIt,.FALSE. )
-      IF (.NOT.GotIt) THEN
-          FabVarName = 'Fabric'
+      TempSol => VariableGet( Solver % Mesh % Variables, TempVar )
+      IF ( ASSOCIATED( TempSol) ) THEN
+        TempPerm    => TempSol % Perm
+        Temperature => TempSol % Values
       END IF
 
       FabricVariable => VariableGet(Solver % Mesh % Variables, FabVarName)
@@ -226,20 +236,20 @@
        FabricValues => FabricVariable % Values
       END IF
 
-      SpinVar => VariableGet(Solver % Mesh %Variables,'Spin')
+      SpinVar => VariableGet(Solver % Mesh %Variables, 'Spin')
       IF ( ASSOCIATED( SpinVar ) ) THEN
       SpinPerm => SpinVar % Perm    
       SpinValues => SpinVar % Values  
       END IF
       
-      StrainRateVar => VariableGet(Solver % Mesh % Variables,'StrainRate')
+      StrainRateVar => VariableGet(Solver % Mesh % Variables, 'StrainRate')
       IF ( ASSOCIATED( StrainRateVar ) ) THEN
       SRPerm => StrainRateVar % Perm    
       SRValues => StrainRateVar % Values  
       END IF
 
       DevStressVar => &
-               VariableGet(Solver % Mesh % Variables,'DeviatoricStress')
+               VariableGet(Solver % Mesh % Variables, 'DeviatoricStress')
       IF ( ASSOCIATED( DevStressVar ) ) THEN
       DSPerm => DevStressVar % Perm    
       DSValues => DevStressVar % Values  
@@ -448,7 +458,7 @@
          CALL LocalMatrix( LocalMassMatrix, LocalStiffMatrix, &
               LocalForce, LoadVector, fab_len / 2, LocalFabric, LocalVelo, &
               LocalTemperature, LocalFlowWidth, LocalFluidity, CurrentElement, n, &
-              ElementNodes, Wn, MinSRInvariant, Isotropic, VariableFlowWidth, &
+              ElementNodes, Wn, MinSRInvariant, Isotropic, NLRheo, VariableFlowWidth, &
               VariableLocalFlowWidth)
 
         TimeForce = 0.0d0
@@ -680,7 +690,7 @@
                  LocalVelo, LocalTemperature, LocalFluidity,  &
                 LocalFlowWidth, fab_len / 2, LocalFabric, Basis, dBasisdx, &
                 CurrentElement, n, ElementNodes, dim, Wn, &
-                MinSRInvariant, Isotropic, VariableFlowWidth, &
+                MinSRInvariant, Isotropic, NLRheo, VariableFlowWidth, &
                 VariableLocalFlowWidth)
                 
         IF (Requal0)   NodalSpin = 0. 
@@ -853,124 +863,143 @@ CONTAINS
       END SUBROUTINE GetMaterialDefs
 !------------------------------------------------------------------------------
 
-!------------------------------------------------------------------------------
       SUBROUTINE LocalMatrix( MassMatrix, StiffMatrix, ForceVector, &
               LoadVector, nlm_len, NodalFabric, NodalVelo, NodalTemperature, NodalFlowWidth, &
-              NodalFluidity, Element, n, Nodes, Wn, MinSRInvariant, Isotropic, &
+              NodalFluidity, Element, n, Nodes, Wn, MinSRInvariant, Isotropic, NLRheo, &
               VariableFlowWidth, VariableLocalFlowWidth )
                        
-!------------------------------------------------------------------------------
+        !------------------------------------------------------------------------------
+        ! Outputs and inputs
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp), INTENT(OUT) :: StiffMatrix(:,:), MassMatrix(:,:)
+        REAL(KIND=dp), DIMENSION(:), INTENT(OUT) :: ForceVector
+        REAL(KIND=dp), INTENT(IN) :: LoadVector(:,:), NodalVelo(:,:)
+        REAL(KIND=dp), INTENT(INOUT) :: Wn(11)  ! We overwrite the fluidity, Wn(1)
+        REAL(KIND=dp), INTENT(IN) :: MinSRInvariant
+        REAL(KIND=dp), DIMENSION(:), INTENT(IN) :: NodalTemperature, &
+                NodalFluidity, NodalFlowWidth
+        REAL(KIND=dp), DIMENSION(:, :), INTENT(IN) :: NodalFabric
+        TYPE(Nodes_t), INTENT(IN) :: Nodes
+        TYPE(Element_t), INTENT(IN) :: Element
+        LOGICAL, INTENT(IN) :: Isotropic, VariableFlowWidth, VariableLocalFlowWidth, NLRheo
+        INTEGER, INTENT(IN) :: n, nlm_len
 
-     REAL(KIND=dp) :: StiffMatrix(:,:), MassMatrix(:,:)
-     REAL(KIND=dp) :: LoadVector(:,:), NodalVelo(:,:)
-     REAL(KIND=dp) :: Wn(11), MinSRInvariant
-     REAL(KIND=dp), DIMENSION(:) :: ForceVector, NodalTemperature, &
-             NodalFluidity, NodalFlowWidth
-     REAL(KIND=dp), DIMENSION(:, :) :: NodalFabric
-     TYPE(Nodes_t) :: Nodes
-     TYPE(Element_t) :: Element
-     LOGICAL :: Isotropic, VariableFlowWidth, VariableLocalFlowWidth
-     INTEGER :: n, nlm_len
-!------------------------------------------------------------------------------
-!
+        !------------------------------------------------------------------------------
+        ! For integration (plus indicies)
+        !------------------------------------------------------------------------------
+        REAL(KIND=dp) :: Basis(2*n), ddBasisddx(1,1,1)
+        REAL(KIND=dp) :: dBasisdx(2*n,3), SqrtElementMetric
+        REAL(KIND=dp) :: Force(3)
+        REAL(KIND=dp), DIMENSION(4,4) :: A, M
+        INTEGER :: i, j, k, p, q, t, dim, NBasis, N_Integ
+        REAL(KIND=dp) :: s, u, v, w, Radius, B(6,3), G(3,6), FW
+        REAL(KIND=dp) :: dDispldx(3,3)
+        TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
+        REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
+        LOGICAL :: stat
 
-     COMPLEX(kind=dp) :: Fabric(nlm_len)
-     REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
-     REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
+        !------------------------------------------------------------------------------
+        ! To calculate physical quantities
+        !------------------------------------------------------------------------------
+        COMPLEX(KIND=dp) :: Fabric(nlm_len)
+        REAL(KIND=dp) :: Bg, BGlenT
+        REAL(KIND=dp) :: Load(3), Temperature, C(6,6)
+        REAL(KIND=dp) :: ss, LGrad(3,3), SR(3,3), Stress(3,3), StrainRate(3,3), D(6), epsi
+        INTEGER :: INDi(6), INDj(6)
+        ! For nonlinear orthotropic rheology
+        REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+        INTEGER :: ind(3)
+        ! For GOLF
+        REAL(KIND=dp) :: ai(3), Angle(3), a2full(3, 3), a2e(6), nn
 
-     REAL(KIND=dp) :: Force(3)
-     Real(kind=dp) :: Bg, BGlenT
+        !------------------------------------------------------------------------------
+        INTERFACE
+          SUBROUTINE R2Ro(a2,dim,spoofdim,ai,angle)
+             USE Types
+             REAL(KIND=dp),INTENT(IN) :: a2(6)
+             Integer :: dim,spoofdim
+             REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
+          End Subroutine R2Ro
+                     
+          SUBROUTINE OPILGGE_ai_nl(ai,Angle,etaI,eta36)
+              USE Types
+              REAL(KIND=dp), INTENT(IN),  DIMENSION(3)   :: ai
+              REAL(KIND=dp), INTENT(IN),  DIMENSION(3)   :: Angle
+              REAL(KIND=dp), INTENT(IN),  DIMENSION(:)   :: etaI
+              REAL(KIND=dp), INTENT(OUT), DIMENSION(6,6) :: eta36
+          END SUBROUTINE OPILGGE_ai_nl
+        END INTERFACE
+        !------------------------------------------------------------------------------
 
-     REAL(KIND=dp), DIMENSION(4,4) :: A,M
-     REAL(KIND=dp) :: Load(3),Temperature,  C(6,6)
-     REAL(KIND=dp) :: nn, ss, LGrad(3,3), SR(3,3), Stress(3,3), StrainRate(3,3), D(6), epsi
-	 INTEGER :: INDi(6),INDj(6)
+        dim = CoordinateSystemDimension()
 
+        ForceVector = 0.0D0
+        StiffMatrix = 0.0D0
+        MassMatrix  = 0.0D0
+   
+        ! Integration stuff
+        NBasis = 2*n
+        IntegStuff = GaussPoints( Element, Element % Type % GaussPoints2 )
+        U_Integ => IntegStuff % u
+        V_Integ => IntegStuff % v
+        W_Integ => IntegStuff % w
+        S_Integ => IntegStuff % s
+        N_Integ =  IntegStuff % n
 
-     INTEGER :: i, j, k, p, q, t, dim, NBasis, ind(3)
+        !   Now we start integrating
+        DO t=1,N_Integ
+          u = U_Integ(t)
+          v = V_Integ(t)
+          w = W_Integ(t)
 
-     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6), FW
-  
-     REAL(KIND=dp) :: dDispldx(3,3), ai(3), Angle(3), a2full(3, 3), a2e(6)
-     TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
+          !     Basis function values & derivatives at the integration point
+          stat = ElementInfo( Element,Nodes,u,v,w,SqrtElementMetric, &
+                Basis,dBasisdx,ddBasisddx,.FALSE.,.TRUE. )
+          s = SqrtElementMetric * S_Integ(t)
 
-     INTEGER :: N_Integ
+          ! Force at integration point
+          Force = 0.0d0
+          DO i=1,dim
+             Force(i) = SUM( LoadVector(i,1:n)*Basis(1:n))
+          END DO
 
-     REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
+          ! Temperature and fluidity at the integration point
+          Temperature = SUM( NodalTemperature(1:n)*Basis(1:n) )
+          Wn(1) = SUM( NodalFluidity(1:n)*Basis(1:n) )
+          Bg = BGlenT(Temperature,Wn)
+          ss = 1.0_dp  ! Default value (used if Wn(1) == 1, i.e. n=1)
 
-     LOGICAL :: stat
+          ! if not isotropic use either GOLF or Nonlinear orthotropic rheology
+          C = 0.0_dp
+          IF (.NOT.Isotropic) Then
+            DO i=1,nlm_len
+              Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
+                                SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
+                                KIND=dp)
+            END DO
 
-     ! For orthotropic rheology
-     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+            ! Only need to calculate the structure tensors if using GOLF
+            IF (.NOT.NLRHeo) THEN
+             a2full = a2(Fabric)
+             a2e(1) = a2full(1, 1)
+             a2e(2) = a2full(2, 2)
+             a2e(3) = a2full(3, 3)
+             a2e(4) = a2full(1, 2)
+             a2e(5) = a2full(2, 3)
+             a2e(6) = a2full(1, 3)
+             CALL R2Ro(a2e,dim,dim,ai,angle)
+             CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
+           END IF 
 
-      dim = CoordinateSystemDimension()
-
-      ForceVector = 0.0D0
-      StiffMatrix = 0.0D0
-      MassMatrix  = 0.0D0
-
-!    
-!    Integration stuff
-!    
-      NBasis = 2*n
-      IntegStuff = GaussPoints( Element, Element % Type % GaussPoints2 )
-
-      U_Integ => IntegStuff % u
-      V_Integ => IntegStuff % v
-      W_Integ => IntegStuff % w
-      S_Integ => IntegStuff % s
-      N_Integ =  IntegStuff % n
-!
-!   Now we start integrating
-!
-
-      DO t=1,N_Integ
-
-      u = U_Integ(t)
-      v = V_Integ(t)
-      w = W_Integ(t)
-
-!------------------------------------------------------------------------------
-!     Basis function values & derivatives at the integration point
-!------------------------------------------------------------------------------
-      stat = ElementInfo( Element,Nodes,u,v,w,SqrtElementMetric, &
-            Basis,dBasisdx,ddBasisddx,.FALSE.,.TRUE. )
-
-      s = SqrtElementMetric * S_Integ(t)
-!------------------------------------------------------------------------------
-!  
-!     Force at integration point
-!   
-      Force = 0.0d0
-      DO i=1,dim
-         Force(i) = SUM( LoadVector(i,1:n)*Basis(1:n))
-      END DO
-!
-!     Temperature at the integration point
-!
-      Temperature = SUM( NodalTemperature(1:n)*Basis(1:n) )
-      Wn(1) = SUM( NodalFluidity(1:n)*Basis(1:n) )
-      Bg=BGlenT(Temperature,Wn)
-      ss=1.0_dp
-
-! if not isotropic use GOLF
-      C = 0.0_dp
-      IF (.NOT.Isotropic) Then
-        DO i=1,nlm_len
-          Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
-                            SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
-                            KIND=dp)
-        END DO
-
-! else use isotropic law
-      ELSE
-          Do i=1,3
-            C(i,i)=2.0_dp 
-          End do
-          Do i=4,6
-            C(i,i)=1.0_dp
-          End do
-      ENDIF
+           ! else use isotropic law
+           ELSE
+             DO i=1,3
+               C(i,i) = 2.0_dp 
+             END DO
+             DO i=4,6
+               C(i,i) = 1.0_dp
+             END DO
+           END IF
       
       FW = SUM( NodalFlowWidth(1:n) * Basis(1:n) )
       Radius = FW / (SUM( NodalFlowWidth(1:n) * dBasisdx(1:n,1)) )
@@ -1010,31 +1039,45 @@ CONTAINS
     ! Compute the invariant 
         nn = (1.0 - Wn(2))/(2.0*Wn(2))
      IF (.NOT.ISOTROPIC) then  ! non linear and anisotropic
-        D(1) = SR(1,1)
-        D(2) = SR(2,2)
-        D(3) = SR(3,3)
-        D(4) = 2. * SR(1,2)
-        D(5) = 2. * SR(2,3)
-        D(6) = 2. * SR(3,1)
-      
-        INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
-        INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
-      ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
-      ! symmetry/reflection axes = eigen directions).
-      call frame(fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
-      Eij = Eeiej(fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+       D(1) = SR(1,1)
+       D(2) = SR(2,2)
+       D(3) = SR(3,3)
+       D(4) = 2. * SR(1,2)
+       D(5) = 2. * SR(2,3)
+       D(6) = 2. * SR(3,1)
 
-      ! Get C and ss, the enhancement of A relative to A_glen
-      CALL Cmat_inverse_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
+       INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
+       INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
+       Stress = 0.
+       IF (NLRheo) THEN
+         ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
+         ! symmetry/reflection axes = eigen directions).
+         CALL frame(fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
+         Eij = Eeiej(fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
 
-      Stress = 0.
-        DO k = 1, 2*dim
+         ! Get C and ss, the enhancement of A relative to A_glen
+         CALL Cmat_inverse_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
+       END IF
+
+       DO k = 1, 2*dim
          DO j = 1, 2*dim
           Stress( INDi(k),INDj(k) ) = &
           Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
          END DO
          IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
-        END DO 
+       END DO 
+
+       IF (.NOT.NLRheo) THEN
+         ss = 0.0_dp
+         DO i = 1, 3
+           DO j = 1, 3
+             ss = ss + Stress(i,j)**2.
+           END DO
+         END DO
+         ss=ss/4.       ! pour avoir le meme resultat si Isotropic
+         IF (ss < MinSRInvariant ) ss = MinSRInvariant
+         ss = (2.*ss)**nn
+       END IF
      Else
         ss = 0.0_dp
         DO i = 1, 3
@@ -1048,7 +1091,7 @@ CONTAINS
 
       END IF
 
-! Non relative viscosity matrix
+      ! Non relative viscosity matrix
        C = C * ss/Bg
 
 !
@@ -1306,7 +1349,7 @@ CONTAINS
         NodalVelo, NodalTemp, NodalFluidity, NodalFlowWidth, &
         nlm_len, NodalFabric, &
         Basis, dBasisdx, Element, n,  Nodes, dim,  Wn, MinSRInvariant, &
-        Isotropic, VariableFlowWidth, VariableLocalFlowWidth )
+        Isotropic, NLRheo, VariableFlowWidth, VariableLocalFlowWidth )
 !------------------------------------------------------------------------------
 !    Subroutine to compute the nodal Strain-Rate, Stress, ...
 !------------------------------------------------------------------------------
@@ -1321,7 +1364,7 @@ CONTAINS
      REAL(KIND=dp) :: NodalFabric(:,:)
      REAL(KIND=dp) :: u, v, w      
      REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant, C(6,6)
-     LOGICAL :: Isotropic,VariableFlowWidth, VariableLocalFlowWidth
+     LOGICAL :: Isotropic,VariableFlowWidth, VariableLocalFlowWidth, NLRheo
       
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t) :: Element
@@ -1332,20 +1375,36 @@ CONTAINS
      REAL(KIND=dp) :: epsi
      Real(kind=dp) :: Bg, BGlenT, ss, nn
      COMPLEX(kind=dp) :: Fabric(nlm_len)
+
+     ! For full nonlinear orthotropic rheology
 !------------------------------------------------------------------------------
      REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+
+     ! For GOLF
+!------------------------------------------------------------------------------
+     INTERFACE
+      Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
+         USE Types
+         REAL(KIND=dp),intent(in) :: a2(6)
+         Integer :: dim,spoofdim
+         REAL(KIND=dp),intent(out) :: ai(3), Angle(3)
+      End Subroutine R2Ro
+                 
+      Subroutine OPILGGE_ai_nl(ai,Angle,etaI,eta36)
+          USE Types
+          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: ai
+          REAL(kind=dp), INTENT(in),  DIMENSION(3)   :: Angle
+          REAL(kind=dp), INTENT(in),  DIMENSION(:)   :: etaI
+          REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
+        END SUBROUTINE OPILGGE_ai_nl
+      END INTERFACE
+!------------------------------------------------------------------------------
 !
-!     Temperature at the integration point
+!     Temperature at the integration point and resulting fluidity
       Temp = SUM( NodalTemp(1:n)*Basis(1:n) )
       Wn(1) = SUM( NodalFluidity(1:n)*Basis(1:n) )
-
-      ! Complex fabric values
-      DO i=1,nlm_len
-        Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
-                          SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
-                          KIND=dp)
-      END DO
-
+      Bg = BGlenT(Temp,Wn)
+      Bg = Bg**(1.0/Wn(2))
 
       Stress = 0.0
       StrainRate = 0.0
@@ -1386,47 +1445,76 @@ CONTAINS
         END DO
       END IF
 
-!
-!    Compute deviatoric stresses: 
-!    ----------------------------
+      ss = 1.0_dp  ! Default value if Wn(2) == 1
+      
+      ! Get the dimensionless C and the effective stress (to the required exponent)
+      IF (.Not.Isotropic) then
+        ! Complex fabric values
+        DO i=1,nlm_len
+          Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
+                            SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
+                            KIND=dp)
+        END DO
 
-    IF (.Not.Isotropic) then
         INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
         INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
         Stress = 0.
+        IF (NLRheo) THEN
+          ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
+          ! symmetry/reflection axes = eigen directions).
+          CALL frame(Fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
+          Eij = Eeiej(Fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
 
-      ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
-      ! symmetry/reflection axes = eigen directions).
-      call frame(Fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
-      Eij = Eeiej(Fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+          ! Get C and ss, the enhancement of A relative to A_glen
+          CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
+        ELSE
+          a2full = a2(Fabric)
+          a2e(1) = a2full(1, 1)
+          a2e(2) = a2full(2, 2)
+          a2e(3) = a2full(3, 3)
+          a2e(4) = a2full(1, 2)
+          a2e(5) = a2full(2, 3)
+          a2e(6) = a2full(1, 3)
+      
+          CALL R2Ro(a2e,dim,dim,ai,Angle)
+          CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
 
-      ! Get C and ss, the enhancement of A relative to A_glen
-      CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
-
-        ss = 0.0_dp
-        DO i = 1, 3
-          DO j = 1, 3
-            ss = ss + StrainRate(i,j)**2.
-          END DO
+          ! This is rolled into Cmat if we use the fully nonlinear orthotropic
+          ! version
+	      IF (Wn(2) > 1.0) THEN 
+            ss = 0.0_dp
+            DO i = 1, 3
+              DO j = 1, 3
+                ss = ss + StrainRate(i,j)**2
+              END DO
+            END DO
+            nn = (1.0 - Wn(2))/(2.0*Wn(2))
+            ss = (ss / 2.0)**nn
+            IF (ss < MinSRInvariant ) ss = MinSRInvariant
+          END IF
+        END IF ! NLRheo
+      ELSE
+        ! Simple diagonal C if not isotropic
+        DO i=1,3
+          C(i,i)=2.0_dp 
         END DO
-        IF (ss < MinSRInvariant ) ss = MinSRInvariant
-        ss = (2.*ss)**nn
-      Bg = BGlenT(Temp,Wn)
-      Bg = Bg**(1.0/Wn(2))
-! Non relative viscosity matrix
-       C = C * ss/Bg
+        DO i=4,6
+          C(i,i)=1.0_dp
+        END DO
+      END IF ! Isotropic
 
+      ! Non relative viscosity matrix
+      C = C * ss / Bg
+
+      ! Calculate the stress
       Stress = 0.
-        DO k = 1, 2*dim
-         DO j = 1, 2*dim
+      DO k = 1, 2*dim
+        DO j = 1, 2*dim
           Stress( INDi(k),INDj(k) ) = &
           Stress( INDi(k),INDj(k) ) + C(k,j) * D(j)
-         END DO
-         IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
-        END DO 
-
-      END IF
-
+        END DO
+        IF (k > 3)  Stress( INDj(k),INDi(k) ) = Stress( INDi(k),INDj(k) )
+       END DO 
 !------------------------------------------------------------------------------
       END SUBROUTINE LocalSD      
 !------------------------------------------------------------------------------
