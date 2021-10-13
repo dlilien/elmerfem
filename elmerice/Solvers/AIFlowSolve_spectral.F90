@@ -122,7 +122,7 @@
      INTEGER :: AIFlowType
      LOGICAL :: GotForceBC, GotIt, NewtonLinearization = .FALSE., &
                 NormalTangential=.FALSE.,UnFoundFatal=.TRUE., &
-                Bubbles=.FALSE.
+                Bubbles
 
      INTEGER :: body_id,bf_id
      INTEGER :: old_body = -1
@@ -161,7 +161,7 @@
        LocalForce, ElementNodes, Alpha, Beta, LocalTemperature, LocalFlowWidth, &
        Isotropic,AllocationsDone,ReferenceTemperature,BoundaryDispl, &
        NodalAIFlow, LocalFabric, Wn, MinSRInvariant, old_body, &
-       LocalFluidity, FabDOFs, NLRheo, TempVar, FabVarName
+       LocalFluidity, FabDOFs, NLRheo, TempVar, FabVarName, Bubbles
 
      SAVE RefD, RefS, RefSpin, LocalVelo, SlipCoeff, LCap, fab_len, SolverName
 
@@ -197,6 +197,15 @@
       SolverParams => GetSolverParams()
 
       IF (FIRSTTIME) THEN
+        Bubbles = ListGetLogical( SolverParams,'Bubbles',GotIt,.False. )
+        IF (.NOT.GotIt) THEN
+          Bubbles = .TRUE.
+          WRITE(Message,'(A)') 'No stabilization flag recognized, using bubbles'
+          CALL INFO(SolverName, Message , level = 3)
+        END IF
+
+      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal )
+
         LCap = ListGetInteger( SolverParams, 'LCap', GotIt, UnfoundFatal=.TRUE.)
         fab_len = 2 * sum([(1+i*2, i=0, Lcap,2)])
         CALL initspecfab(Lcap)
