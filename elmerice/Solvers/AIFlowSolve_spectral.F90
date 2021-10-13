@@ -22,14 +22,13 @@
 ! *****************************************************************************/
 ! ******************************************************************************
 ! *
-! *  Authors: Juha Ruokolainen, Fabien Gillet-Chaulet, Olivier Gagliardini
-! *  Email:   Juha.Ruokolainen@csc.fi
+! *  Authors of tensorial solver: Juha Ruokolainen, Fabien Gillet-Chaulet, Olivier Gagliardini
+! *  Authors of spectral solver: David Lilien and Nicholas Rathmann
+! *  Email:   dlilien90@gmail.com
 ! *  Web:     http://elmerice.elmerfem.org
 ! *
-! *  Original Date: 08 Jun 1997
-! *       Date of modification: April 08 => non linear
-! *                             May 09 => N-T (see mail Juha 20 Feb 2006) OG
-! *                             Dec 15 =>2.5D FlowWidth O. Passalacqua
+! *  Original Date: 13 October, 2021
+! *                             
 ! * 
 ! *****************************************************************************
 !> Module containing a solver for (primarily thermal) anisotropic flow
@@ -72,7 +71,7 @@
      TYPE(Matrix_t),POINTER :: StiffMatrix
 
      INTEGER :: i, j, k, l, n, t, iter, NDeg, STDOFs, LocalNodes, istat
-     INTEGER :: dim, comp, FabDOFs
+     INTEGER :: dim, comp, nb, FabDOFs
 
      TYPE(ValueList_t),POINTER :: Material, BC, BodyForce, SolverParams
      TYPE(Nodes_t) :: ElementNodes
@@ -122,7 +121,8 @@
 
      INTEGER :: AIFlowType
      LOGICAL :: GotForceBC, GotIt, NewtonLinearization = .FALSE., &
-                NormalTangential=.FALSE.,UnFoundFatal=.TRUE.
+                NormalTangential=.FALSE.,UnFoundFatal=.TRUE., &
+                Bubbles=.FALSE.
 
      INTEGER :: body_id,bf_id
      INTEGER :: old_body = -1
@@ -271,6 +271,11 @@
       IF ( .NOT. AllocationsDone .OR. Solver % Mesh % Changed) THEN
         N = Model % MaxElementNodes
         dim = CoordinateSystemDimension()
+        if ( Bubbles ) THEN
+            NB = 2 * n
+        ELSE
+            NB = n
+        END IF
 
        IF ( AllocationsDone ) THEN
          DEALLOCATE( ElementNodes % x,     &
@@ -460,10 +465,10 @@
               LocalForce, LoadVector, fab_len / 2, LocalFabric, LocalVelo, &
               LocalTemperature, LocalFlowWidth, LocalFluidity, CurrentElement, n, &
               ElementNodes, Wn, MinSRInvariant, Isotropic, NLRheo, VariableFlowWidth, &
-              VariableLocalFlowWidth)
+              VariableLocalFlowWidth, Bubbles)
 
         TimeForce = 0.0d0
-         CALL NSCondensate(N, N,STDOFs-1,LocalStiffMatrix,LocalForce,TimeForce )
+        IF ( Bubbles ) CALL NSCondensate(N, N,STDOFs-1,LocalStiffMatrix,LocalForce,TimeForce )
 !------------------------------------------------------------------------------
 !        Update global matrices from local matrices 
 !------------------------------------------------------------------------------
@@ -651,7 +656,7 @@
            LocalTemperature(1:n) = 0.0d0
          END IF
 
-! n nodales values of the fabric parameters, not needed if isotropic
+! nodal values of the fabric parameters, not needed if isotropic
          IF(.NOT.Isotropic) Then
            DO i=1,fab_len
              LocalFabric(i, 1:n) = FabricValues( fab_len * (FabricPerm(NodeIndexes(1:n))-1) + i ) 
@@ -690,7 +695,7 @@
            CALL LocalSD(NodalStresses, NodalStrainRate, NodalSpin, & 
                  LocalVelo, LocalTemperature, LocalFluidity,  &
                 LocalFlowWidth, fab_len / 2, LocalFabric, Basis, dBasisdx, &
-                CurrentElement, n, ElementNodes, dim, Wn, &
+                CurrentElement, n, nb, ElementNodes, dim, Wn, &
                 MinSRInvariant, Isotropic, NLRheo, VariableFlowWidth, &
                 VariableLocalFlowWidth)
                 
@@ -859,7 +864,7 @@
       SUBROUTINE LocalMatrix( MassMatrix, StiffMatrix, ForceVector, &
               LoadVector, nlm_len, NodalFabric, NodalVelo, NodalTemperature, NodalFlowWidth, &
               NodalFluidity, Element, n, Nodes, Wn, MinSRInvariant, Isotropic, NLRheo, &
-              VariableFlowWidth, VariableLocalFlowWidth )
+              VariableFlowWidth, VariableLocalFlowWidth, Bubbles )
         !------------------------------------------------------------------------------
         ! Outputs and inputs
         !------------------------------------------------------------------------------
@@ -873,7 +878,7 @@
         REAL(KIND=dp), DIMENSION(:, :), INTENT(IN) :: NodalFabric
         TYPE(Nodes_t), INTENT(IN) :: Nodes
         TYPE(Element_t), INTENT(IN) :: Element
-        LOGICAL, INTENT(IN) :: Isotropic, VariableFlowWidth, VariableLocalFlowWidth, NLRheo
+        LOGICAL, INTENT(IN) :: Isotropic, VariableFlowWidth, VariableLocalFlowWidth, NLRheo, Bubbles
         INTEGER, INTENT(IN) :: n, nlm_len
 
         !------------------------------------------------------------------------------
@@ -928,8 +933,13 @@
         MassMatrix  = 0.0D0
    
         ! Integration stuff
-        NBasis = 2*n
-        IntegStuff = GaussPoints( Element, Element % Type % GaussPoints2 )
+        IF ( Bubbles ) THEN
+          NBasis = 2*n
+          IntegStuff = GaussPoints( Element, Element % Type % GaussPoints2 )
+        ELSE
+          NBasis = n
+          IntegStuff = GaussPoints( Element )
+        END IF
         U_Integ => IntegStuff % u
         V_Integ => IntegStuff % v
         W_Integ => IntegStuff % w
@@ -944,7 +954,7 @@
 
           !     Basis function values & derivatives at the integration point
           stat = ElementInfo( Element,Nodes,u,v,w,SqrtElementMetric, &
-                Basis,dBasisdx,ddBasisddx,.FALSE.,.TRUE. )
+                Basis,dBasisdx,ddBasisddx,.FALSE.,Bubbles=Bubbles )
           s = SqrtElementMetric * S_Integ(t)
 
           ! Force at integration point
@@ -1323,17 +1333,17 @@
 
 
       SUBROUTINE LocalSD( Stress, StrainRate, Spin, NodalVelo, NodalTemp, NodalFluidity, &
-                          NodalFlowWidth, nlm_len, NodalFabric,  Basis, dBasisdx, &
-                          Element, n,  Nodes, dim,  Wn, MinSRInvariant, Isotropic, &
+                          NodalFlowWidth, nlm_len, NodalFabric, Basis, dBasisdx, &
+                          Element, n, nbasis, Nodes, dim,  Wn, MinSRInvariant, Isotropic, &
                           NLRheo, VariableFlowWidth, VariableLocalFlowWidth )
         ! Subroutine to compute the nodal Strain-Rate, Stress, ...
-        INTEGER :: n, dim, nlm_len
+        INTEGER :: n, dim, nlm_len, nbasis
         INTEGER :: INDi(6),INDj(6)
         REAL(KIND=dp) :: Stress(:,:), StrainRate(:,:), Spin(:,:)
         REAL(KIND=dp) :: NodalVelo(:,:), NodalTemp(:), NodalFluidity(:), &
                          NodalFlowWidth(:)
-        REAL(KIND=dp) :: Basis(2*n), ddBasisddx(1,1,1)
-        REAL(KIND=dp) :: dBasisdx(2*n,3)
+        REAL(KIND=dp) :: Basis(nbasis), ddBasisddx(1,1,1)
+        REAL(KIND=dp) :: dBasisdx(nbasis,3)
         REAL(KIND=dp) :: detJ
         REAL(KIND=dp) :: NodalFabric(:,:)
         REAL(KIND=dp) :: u, v, w      
