@@ -204,7 +204,7 @@
           CALL INFO(SolverName, Message , level = 3)
         END IF
 
-      TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal )
+        TempVar = ListGetString( SolverParams,'Temperature Solution Name',GotIt,UnFoundFatal )
 
         LCap = ListGetInteger( SolverParams, 'LCap', GotIt, UnfoundFatal=.TRUE.)
         fab_len = 2 * sum([(1+i*2, i=0, Lcap,2)])
@@ -230,6 +230,7 @@
           WRITE(Message,'(A,A)') 'Fabric Name unfound, assuming ', FabVarName
           CALL INFO(SolverName, Message , level = 3)
         END IF
+
         FIRSTTIME = .FALSE.
       END IF
 
@@ -258,8 +259,7 @@
       SRValues => StrainRateVar % Values  
       END IF
 
-      DevStressVar => &
-               VariableGet(Solver % Mesh % Variables, 'DeviatoricStress')
+      DevStressVar => VariableGet(Solver % Mesh % Variables, 'DeviatoricStress')
       IF ( ASSOCIATED( DevStressVar ) ) THEN
       DSPerm => DevStressVar % Perm    
       DSValues => DevStressVar % Values  
@@ -313,9 +313,9 @@
                  LocalFlowWidth (N), &
                  LocalFabric(fab_len, N), &
                  LocalForce( 2*STDOFs*N ),&
-                 RefS(2*dim*LocalNodes ),&                              
-                 RefD(2*dim*LocalNodes ),&                              
-                 RefSpin((2*dim-3)*LocalNodes ),&                       
+                 RefS(NB / n *dim*LocalNodes ),&                              
+                 RefD(NB / n *dim*LocalNodes ),&                              
+                 RefSpin((NB / n*dim-3)*LocalNodes ),&                       
                  LocalVelo( 3,N ),&                                     
                  Basis( 2*N ),ddBasisddx(1,1,1), dBasisdx( 2*N,3 ), &
                  TimeForce( 2*STDOFs*N ), &
@@ -605,13 +605,14 @@
     END DO ! of nonlinear iter
 !------------------------------------------------------------------------------
 
+
 !------------------------------------------------------------------------------
 !   Compute the StrainRate, Spin  and deviatoric Stress
 !   Nodal values      
 !------------------------------------------------------------------------------
 
      IF ((ASSOCIATED( StrainRateVar)).OR.(ASSOCIATED(DevStressVar))&
-      .OR.(ASSOCIATED(SpinVar))) THEN
+       .OR.(ASSOCIATED(SpinVar))) THEN
        RefD=0.
        RefS=0.
        RefSpin=0.
@@ -653,8 +654,7 @@
          ElementNodes % y(1:n) = Model % Nodes % y(NodeIndexes(1:n))
          ElementNodes % z(1:n) = Model % Nodes % z(NodeIndexes(1:n))
 
-! n nodale values of the temperature
-         
+         ! nodal values of the temperature
          LocalTemperature = 0.0D0
          IF ( ASSOCIATED(TempSol) ) THEN
            DO i=1,n
@@ -665,7 +665,7 @@
            LocalTemperature(1:n) = 0.0d0
          END IF
 
-! nodal values of the fabric parameters, not needed if isotropic
+         ! nodal values of the fabric parameters, not needed if isotropic
          IF(.NOT.Isotropic) Then
            DO i=1,fab_len
              LocalFabric(i, 1:n) = FabricValues( fab_len * (FabricPerm(NodeIndexes(1:n))-1) + i ) 
@@ -678,7 +678,7 @@
          DO i=1,STDOFs - 1
             LocalVelo(i,1:n) = AIFlow( STDOFs*(AIFlowPerm(NodeIndexes(1:n))-1) + i)
          END DO
-         
+
 ! Go for all nodes of the element        
          Do i=1,n
 
@@ -711,50 +711,50 @@
         IF (Requal0)   NodalSpin = 0. 
         
            IF (ASSOCIATED(StrainRateVar)) &
-             RefD(2*dim*(SRPerm(NodeIndexes(i))-1)+1 : &
-                                      2*dim*SRPerm(NodeIndexes(i))) &
-             =RefD(2*dim*(SRPerm(NodeIndexes(i))-1)+1 : &
-                                      2*dim*SRPerm(NodeIndexes(i))) + 1.
+             RefD(nb /n *dim*(SRPerm(NodeIndexes(i))-1)+1 : &
+                                      nb /n*dim*SRPerm(NodeIndexes(i))) &
+             =RefD(nb /n*dim*(SRPerm(NodeIndexes(i))-1)+1 : &
+                                      nb /n*dim*SRPerm(NodeIndexes(i))) + 1.
 
           IF (ASSOCIATED(DevStressVar)) &
-            RefS(2*dim*(DSPerm(NodeIndexes(i))-1)+1 : &
-                                      2*dim*DSPerm(NodeIndexes(i))) &
-            =RefS(2*dim*(DSPerm(NodeIndexes(i))-1)+1 :  &
-                                      2*dim*DSPerm(NodeIndexes(i))) + 1.
+            RefS(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+1 : &
+                                      nb/n*dim*DSPerm(NodeIndexes(i))) &
+            =RefS(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+1 :  &
+                                      nb/n*dim*DSPerm(NodeIndexes(i))) + 1.
 
           IF (ASSOCIATED(SpinVar)) &
-            RefSpin((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
-                                (2*dim-3)*SpinPerm(NodeIndexes(i))) &
-            =RefSpin((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
-                                (2*dim-3)*SpinPerm(NodeIndexes(i))) + 1.
+            RefSpin((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
+                                (nb/n*dim-3)*SpinPerm(NodeIndexes(i))) &
+            =RefSpin((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
+                                (nb/n*dim-3)*SpinPerm(NodeIndexes(i))) + 1.
 
 
            IF (ASSOCIATED(StrainRateVar)) THEN
              comp=0
-             DO j=1,2*dim
+             DO j=1,nb/n*dim
                comp=comp+1
-               SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+comp)=&
-               SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+comp) + &
+               SRValues(nb/n*dim*(SRPerm(NodeIndexes(i))-1)+comp)=&
+               SRValues(nb /n*dim*(SRPerm(NodeIndexes(i))-1)+comp) + &
                 NodalStrainRate(INDi(j),INDj(j))
              END DO
            END IF
 
            IF (ASSOCIATED(DevStressVar)) THEN
              comp=0
-             DO j=1,2*dim
+             DO j=1,nb/n*dim
                comp=comp+1
-               DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+comp)=&
-                DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+comp) + &
+               DSValues(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+comp)=&
+                DSValues(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+comp) + &
                 NodalStresses(INDi(j),INDj(j))
              END DO
            END IF
 
            IF (ASSOCIATED(SpinVar)) THEN
              comp=0
-             DO j=1,(2*dim-3)
+             DO j=1,(nb/n*dim-3)
              comp=comp+1
-             SpinValues((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp)=&
-             SPinValues((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp) + &
+             SpinValues((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp)=&
+             SPinValues((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp) + &
              NodalSpin(INDi(j+3),INDj(j+3))
              END DO
            END IF
