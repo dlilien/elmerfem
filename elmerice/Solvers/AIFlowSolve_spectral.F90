@@ -82,7 +82,7 @@
          
 
      REAL(KIND=dp)  :: NodalStresses(3,3), &
-       NodalStrainRate(3,3),  NodalSpin(3,3)   
+       NodalStrainRate(3,3),  NodalSpin(3,3), NodalEV, NodalEF(6,6)
 
      REAL(KIND=dp), ALLOCATABLE :: Basis(:),ddBasisddx(:,:,:)
      REAL(KIND=dp), ALLOCATABLE :: dBasisdx(:,:), SlipCoeff(:,:)
@@ -105,6 +105,14 @@
      TYPE(Variable_t), POINTER :: DevStressVar 
      REAL(KIND=dp), POINTER :: DSValues(:)
      INTEGER, POINTER :: DSPerm(:)
+
+     TYPE(Variable_t), POINTER :: EffectiveViscVar 
+     REAL(KIND=dp), POINTER :: EVValues(:)
+     INTEGER, POINTER :: EVPerm(:)
+
+     TYPE(Variable_t), POINTER :: EnhancementFactorsVar 
+     REAL(KIND=dp), POINTER :: EFValues(:)
+     INTEGER, POINTER :: EFPerm(:)
 
      TYPE(Variable_t), POINTER :: StrainRateVar 
      REAL(KIND=dp), POINTER :: SRValues(:)
@@ -135,7 +143,7 @@
        LocalStiffMatrix(:,:), LoadVector(:,:), LocalForce(:), &
        LocalTemperature(:), Alpha(:,:), Beta(:), & 
        ReferenceTemperature(:), BoundaryDispl(:), LocalFabric(:, :), &
-       TimeForce(:), RefS(:), RefD(:), RefSpin(:), &
+       TimeForce(:), RefS(:), RefD(:), RefSpin(:), RefEV(:), RefEF(:), &
        LocalVelo(:,:), LocalFluidity(:), LocalFlowWidth(:)
             
      INTEGER :: NumberOfBoundaryNodes
@@ -161,9 +169,10 @@
        LocalForce, ElementNodes, Alpha, Beta, LocalTemperature, LocalFlowWidth, &
        Isotropic,AllocationsDone,ReferenceTemperature,BoundaryDispl, &
        NodalAIFlow, LocalFabric, Wn, MinSRInvariant, old_body, &
-       LocalFluidity, FabDOFs, NLRheo, TempVar, FabVarName, Bubbles
+       LocalFluidity, FabDOFs, NLRheo, TempVar, FabVarName, Bubbles, &
+       n, nb
 
-     SAVE RefD, RefS, RefSpin, LocalVelo, SlipCoeff, LCap, fab_len, SolverName
+     SAVE RefD, RefS, RefSpin, RefEV, RefEF, LocalVelo, SlipCoeff, LCap, fab_len, SolverName
 
      SolverName = 'AIFlowSolve_Spectral'
 
@@ -264,6 +273,18 @@
       DSPerm => DevStressVar % Perm    
       DSValues => DevStressVar % Values  
       END IF
+
+      EffectiveViscVar => VariableGet(Solver % Mesh % Variables, 'EffectiveViscosity')
+      IF ( ASSOCIATED( EffectiveViscVar ) ) THEN
+      EVPerm => EffectiveViscVar % Perm    
+      EVValues => EffectiveViscVar % Values  
+      END IF
+
+      EnhancementFactorsVar => VariableGet(Solver % Mesh % Variables, 'EnhancementFactors')
+      IF ( ASSOCIATED( EnhancementFactorsVar ) ) THEN
+      EFPerm => EnhancementFactorsVar % Perm
+      EFValues => EnhancementFactorsVar % Values  
+      END IF
       
       IF ( CurrentCoordinateSystem() == AxisSymmetric ) THEN
       CSymmetry = .TRUE.
@@ -298,6 +319,7 @@
                      LocalVelo,            &
                      LocalForce,           &
                      RefD, RefS, RefSpin,  &
+                     RefEF, RefEV,         &
                      LocalMassMatrix,      &
                      LocalStiffMatrix,     &
                      LoadVector, Alpha, Beta, &
@@ -313,9 +335,11 @@
                  LocalFlowWidth (N), &
                  LocalFabric(fab_len, N), &
                  LocalForce( 2*STDOFs*N ),&
-                 RefS(NB / n *dim*LocalNodes ),&                              
-                 RefD(NB / n *dim*LocalNodes ),&                              
-                 RefSpin((NB / n*dim-3)*LocalNodes ),&                       
+                 RefS(2 *dim*LocalNodes ),&                              
+                 RefD(2 *dim*LocalNodes ),&                              
+                 RefSpin((2*dim-3)*LocalNodes ),&                       
+                 RefEF( 36 * LocalNodes ),&                              
+                 RefEV( LocalNodes ),&                              
                  LocalVelo( 3,N ),&                                     
                  Basis( 2*N ),ddBasisddx(1,1,1), dBasisdx( 2*N,3 ), &
                  TimeForce( 2*STDOFs*N ), &
@@ -612,13 +636,17 @@
 !------------------------------------------------------------------------------
 
      IF ((ASSOCIATED( StrainRateVar)).OR.(ASSOCIATED(DevStressVar))&
-       .OR.(ASSOCIATED(SpinVar))) THEN
+       .OR.(ASSOCIATED(SpinVar)).OR.(ASSOCIATED(EffectiveViscVar)).OR.(ASSOCIATED(EnhancementFactorsVar))) THEN
        RefD=0.
        RefS=0.
        RefSpin=0.
+       RefEF=0.
+       RefEV=0.
        IF (ASSOCIATED(StrainRateVar)) SRValues = 0.
        IF (ASSOCIATED(devStressVar)) DSValues = 0.
        IF (ASSOCIATED(SPinVar)) SpinValues = 0.
+       IF (ASSOCIATED(EffectiveViscVar)) EVValues = 0.
+       IF (ASSOCIATED(EnhancementFactorsVar)) EFValues = 0.
 
       DO t=1,Solver % NumberOFActiveElements
 
@@ -701,62 +729,75 @@
                      Basis,dBasisdx,ddBasisddx,.FALSE.,.FALSE.)
         END IF
 
-           CALL LocalSD(NodalStresses, NodalStrainRate, NodalSpin, & 
+           CALL LocalSD(NodalStresses, NodalStrainRate, NodalSpin, NodalEV, NodalEF, & 
                  LocalVelo, LocalTemperature, LocalFluidity,  &
                 LocalFlowWidth, fab_len / 2, LocalFabric, Basis, dBasisdx, &
                 CurrentElement, n, nb, ElementNodes, dim, Wn, &
                 MinSRInvariant, Isotropic, NLRheo, VariableFlowWidth, &
                 VariableLocalFlowWidth)
                 
-        IF (Requal0)   NodalSpin = 0. 
-        
-           IF (ASSOCIATED(StrainRateVar)) &
-             RefD(nb /n *dim*(SRPerm(NodeIndexes(i))-1)+1 : &
-                                      nb /n*dim*SRPerm(NodeIndexes(i))) &
-             =RefD(nb /n*dim*(SRPerm(NodeIndexes(i))-1)+1 : &
-                                      nb /n*dim*SRPerm(NodeIndexes(i))) + 1.
-
-          IF (ASSOCIATED(DevStressVar)) &
-            RefS(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+1 : &
-                                      nb/n*dim*DSPerm(NodeIndexes(i))) &
-            =RefS(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+1 :  &
-                                      nb/n*dim*DSPerm(NodeIndexes(i))) + 1.
-
-          IF (ASSOCIATED(SpinVar)) &
-            RefSpin((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
-                                (nb/n*dim-3)*SpinPerm(NodeIndexes(i))) &
-            =RefSpin((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
-                                (nb/n*dim-3)*SpinPerm(NodeIndexes(i))) + 1.
+          IF (Requal0)   NodalSpin = 0. 
 
 
-           IF (ASSOCIATED(StrainRateVar)) THEN
+          IF (ASSOCIATED(StrainRateVar)) THEN
+            RefD(2*dim*(SRPerm(NodeIndexes(i))-1)+1 : &
+                                      2*dim*SRPerm(NodeIndexes(i))) &
+               =RefD(2*dim*(SRPerm(NodeIndexes(i))-1)+1 : &
+                                      2*dim*SRPerm(NodeIndexes(i))) + 1.
              comp=0
-             DO j=1,nb/n*dim
+             DO j=1,2*dim
                comp=comp+1
-               SRValues(nb/n*dim*(SRPerm(NodeIndexes(i))-1)+comp)=&
-               SRValues(nb /n*dim*(SRPerm(NodeIndexes(i))-1)+comp) + &
+               SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+comp)=&
+               SRValues(2*dim*(SRPerm(NodeIndexes(i))-1)+comp) + &
                 NodalStrainRate(INDi(j),INDj(j))
              END DO
            END IF
 
            IF (ASSOCIATED(DevStressVar)) THEN
+             RefS(2*dim*(DSPerm(NodeIndexes(i))-1)+1 : &
+                                      2*dim*DSPerm(NodeIndexes(i))) &
+               =RefS(2*dim*(DSPerm(NodeIndexes(i))-1)+1 :  &
+                                      2*dim*DSPerm(NodeIndexes(i))) + 1.
              comp=0
-             DO j=1,nb/n*dim
+             DO j=1,2*dim
                comp=comp+1
-               DSValues(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+comp)=&
-                DSValues(nb/n*dim*(DSPerm(NodeIndexes(i))-1)+comp) + &
+               DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+comp)=&
+                DSValues(2*dim*(DSPerm(NodeIndexes(i))-1)+comp) + &
                 NodalStresses(INDi(j),INDj(j))
              END DO
            END IF
 
            IF (ASSOCIATED(SpinVar)) THEN
+             RefSpin((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
+                                (2*dim-3)*SpinPerm(NodeIndexes(i))) &
+               =RefSpin((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+1 :  &
+                                  (2*dim-3)*SpinPerm(NodeIndexes(i))) + 1.
              comp=0
-             DO j=1,(nb/n*dim-3)
+             DO j=1,(2*dim-3)
              comp=comp+1
-             SpinValues((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp)=&
-             SPinValues((nb/n*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp) + &
+             SpinValues((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp)=&
+             SPinValues((2*dim-3)*(SpinPerm(NodeIndexes(i))-1)+comp) + &
              NodalSpin(INDi(j+3),INDj(j+3))
              END DO
+           END IF
+
+           IF (ASSOCIATED(EnhancementFactorsVar)) THEN
+             RefEF(36*(EFPerm(NodeIndexes(i))-1)+1 :36*EFPerm(NodeIndexes(i))) &
+               = RefEF(36*(EFPerm(NodeIndexes(i))-1)+1 :36*EFPerm(NodeIndexes(i))) + 1.
+             comp=0
+             DO j=1,6
+               DO k=1,6
+                 comp=comp+1
+                 EFValues(36*(EFPerm(NodeIndexes(i))-1)+comp)=&
+                   EFValues(36*(EFPerm(NodeIndexes(i))-1)+comp) + &
+                   NodalEF(j,k)
+               END DO
+             END DO
+           END IF
+
+           IF (ASSOCIATED(EffectiveViscVar)) THEN
+             RefEV(EVPerm(NodeIndexes(i))) = RefEV(EVPerm(NodeIndexes(i))) + 1
+             EVValues(EVPerm(NodeIndexes(i)))= EVValues(EVPerm(NodeIndexes(i))) + NodalEV
            END IF
 
           END DO
@@ -777,6 +818,18 @@
         IF (ASSOCIATED(SpinVar)) THEN
             WHERE(RefSpin > 0.)
                 SpinVAlues = SpinValues / RefSpin
+            END WHERE
+        END IF
+
+        IF (ASSOCIATED(EffectiveViscVar)) THEN
+            WHERE(RefEV > 0.)
+                EVVAlues = EVValues / RefEV
+            END WHERE
+        END IF
+
+        IF (ASSOCIATED(EnhancementFactorsVar)) THEN
+            WHERE(RefEF > 0.)
+                EFValues = EFValues / RefEF
             END WHERE
         END IF
         
@@ -1341,7 +1394,8 @@
       END SUBROUTINE LocalMatrixBoundary
 
 
-      SUBROUTINE LocalSD( Stress, StrainRate, Spin, NodalVelo, NodalTemp, NodalFluidity, &
+      SUBROUTINE LocalSD( Stress, StrainRate, Spin, EffectiveViscosity, EnhancementFactors, &
+                          NodalVelo, NodalTemp, NodalFluidity, &
                           NodalFlowWidth, nlm_len, NodalFabric, Basis, dBasisdx, &
                           Element, n, nbasis, Nodes, dim,  Wn, MinSRInvariant, Isotropic, &
                           NLRheo, VariableFlowWidth, VariableLocalFlowWidth )
@@ -1353,10 +1407,10 @@
                          NodalFlowWidth(:)
         REAL(KIND=dp) :: Basis(nbasis), ddBasisddx(1,1,1)
         REAL(KIND=dp) :: dBasisdx(nbasis,3)
-        REAL(KIND=dp) :: detJ
+        REAL(KIND=dp) :: detJ, EffectiveViscosity
         REAL(KIND=dp) :: NodalFabric(:,:)
         REAL(KIND=dp) :: u, v, w      
-        REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant, C(6,6)
+        REAL(KIND=dp) :: Wn(11),  D(6), MinSRInvariant, EnhancementFactors(6,6), C(6,6)
         LOGICAL :: Isotropic,VariableFlowWidth, VariableLocalFlowWidth, NLRheo
         TYPE(Nodes_t) :: Nodes
         TYPE(Element_t) :: Element
@@ -1450,7 +1504,7 @@
             Eij = Eeiej(Fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
 
             ! Get C and ss, the enhancement of A relative to A_glen
-            CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, C)
+            CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, EnhancementFactors)
           ELSE ! GOLF
             a2full = a2(Fabric)
             a2e(1) = a2full(1, 1)
@@ -1461,7 +1515,7 @@
             a2e(6) = a2full(1, 3)
          
             CALL R2Ro(a2e,dim,dim,ai,Angle)
-            CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,C)
+            CALL OPILGGE_ai_nl(ai,Angle,FabricGrid,EnhancementFactors)
 
             ! This is rolled into Cmat if we use the fully nonlinear orthotropic
             ! version
@@ -1480,15 +1534,16 @@
         ELSE  ! Isotropic
           ! Simple diagonal C if isotropic
           DO i=1,3
-            C(i,i)=2.0_dp 
+            EnhancementFactors(i,i)=2.0_dp 
           END DO
           DO i=4,6
-            C(i,i)=1.0_dp
+            EnhancementFactors(i,i)=1.0_dp
           END DO
         END IF ! Isotropic
 
         ! Non relative viscosity matrix
-        C = C * ss / Bg
+        C = EnhancementFactors * ss / Bg
+        EffectiveViscosity = ss / Bg
 
         ! Calculate the stress
         Stress = 0.
