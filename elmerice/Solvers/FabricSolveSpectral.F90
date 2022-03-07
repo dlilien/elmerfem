@@ -991,7 +991,8 @@ CONTAINS
      REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS
      COMPLEX(KIND=dp) :: Fabric(nlm_len), NodalGradient(nlm_len)
      COMPLEX(KIND=dp) :: dndt(nlm_len, nlm_len), dndt_ROT(nlm_len, nlm_len),&
-                      dndt_DDRX(nlm_len, nlm_len), dndt_CDRX(nlm_len, nlm_len)
+                         dndt_DDRX(nlm_len, nlm_len), dndt_CDRX(nlm_len,nlm_len),&
+                         dndt_REG(nlm_len, nlm_len)
      Integer :: INDi(6),INDj(6)
      INTEGER :: N_Integ
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
@@ -1106,7 +1107,7 @@ CONTAINS
       do i = 1,3
             SR(i,i) = SR(i,i) / 2.0_dp
       end do
-      Stress = tau_of_eps__orthotropic__dimless(SR, INT(Wn(2)), e1,e2,e3, Eij)
+      Stress = tau_of_eps__orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij)
       do i = 1,3
         do j = 1,3
             if (i.ne.j) then
@@ -1159,8 +1160,9 @@ CONTAINS
                                 0.0_dp, 0.0_dp, 0.0_dp, 1.0_dp)
       dndt_DDRX = dndt_ij_DDRX(Fabric, Stress)
       dndt_CDRX = dndt_ij_CDRX()
+      dndt_REG = dndt_ij_REG(EPS)
 
-      dndt = gammav * dndt_DDRX + lambda * dndt_CDRX + Wn(9) * dndt_ROT
+      dndt = gammav * dndt_DDRX + lambda * dndt_CDRX + Wn(9) * dndt_ROT + dndt_REG
       NodalGradient = MATMUL(dndt, Fabric)
       DO i=1,nlm_len
         Gradient(i, t) = REAL(NodalGradient(i)) ! - REAL(dndt(i, i) * Fabric(i))
