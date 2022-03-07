@@ -1440,6 +1440,8 @@
               REAL(kind=dp), INTENT(out), DIMENSION(6,6) :: eta36
             END SUBROUTINE OPILGGE_ai_nl
         END INTERFACE
+        INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
+        INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
 
         ! Temperature at the integration point and resulting fluidity
         Temp = SUM( NodalTemp(1:n)*Basis(1:n) )
@@ -1494,8 +1496,6 @@
                               KIND=dp)
           END DO
 
-          INDi(1:6) = (/ 1, 2, 3, 1, 2, 3 /)
-          INDj(1:6) = (/ 1, 2, 3, 2, 3, 1 /)
           Stress = 0.
           IF (NLRheo) THEN
             ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
@@ -1544,6 +1544,13 @@
         ! Non relative viscosity matrix
         C = EnhancementFactors * ss / Bg
         EffectiveViscosity = ss / Bg
+
+        D(1) = StrainRate(1,1)
+        D(2) = StrainRate(2,2)
+        D(3) = StrainRate(3,3)
+        D(4) = 2. * StrainRate(1,2)
+        D(5) = 2. * StrainRate(2,3)
+        D(6) = 2. * StrainRate(3,1)
 
         ! Calculate the stress
         Stress = 0.
