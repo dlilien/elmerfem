@@ -99,7 +99,7 @@
                         FlowPerm(:),MeshVeloPerm(:),TensorFabricPerm(:),&
                         OOPlaneRotPerm13(:),OOPlaneRotPerm23(:),GradPerm(:)
 
-     REAL(KIND=dp) :: rho,lambda0,gamma0   !Interaction parameter,diffusion parameter
+     REAL(KIND=dp) :: rho,lambdanaught,gammanaught   !Interaction parameter,diffusion parameter
      REAL(KIND=dp) :: A1plusA2
      Real(KIND=dp), parameter :: Rad2deg=180._dp/Pi
      REAL(KIND=dp) :: a2short(5)
@@ -129,9 +129,9 @@
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, &
-          Wn,  FabricGrid, rho, lambda0, Velocity, &
+          Wn,  FabricGrid, rho, lambdanaught, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
-          spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad,gamma0,&
+          spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad,gammanaught,&
           LocalFabric, LocalLHS, ElLHSVals, nlm
 !------------------------------------------------------------------------------
      CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
@@ -442,12 +442,12 @@
          CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
                        LocalTemperature, LocalFluidity,  Velocity, &
                        MeshVelocity, CurrentElement, n, ElementNodes, &
-                       Wn, rho, lambda0, gamma0, LocalOOP23, LocalOOP13)
+                       Wn, rho, lambdanaught, gammanaught, LocalOOP23, LocalOOP13)
        ELSE
          CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
                        LocalTemperature, LocalFluidity,  Velocity, &
                        MeshVelocity, CurrentElement, n, ElementNodes, &
-                       Wn, rho, lambda0, gamma0)
+                       Wn, rho, lambdanaught, gammanaught)
        END IF
          ElGradVals(t, :, :) = LocalGrad(:, :)
          ElLHSVals(t, :, :) = LocalGrad(:, :)
@@ -827,6 +827,7 @@
       END IF
 CONTAINS
 
+!------------------------------------------------------------------------------
       SUBROUTINE GetMaterialDefs()
 
       viscosityFile = ListGetString( Material ,'Viscosity File',GotIt, UnFoundFatal)
@@ -848,9 +849,9 @@ CONTAINS
            CALL INFO('FabricSolveSpectral', Message, Level = 20)
        END IF
 
-       lambda0 = ListGetConstReal( Material, 'Diffusion Intercept', GotIt,UnFoundFatal=UnFoundFatal)
+       lambdanaught = ListGetConstReal( Material, 'Diffusion Intercept', GotIt,UnFoundFatal=UnFoundFatal)
            !Previous default value: lambda = 0.0_dp
-      WRITE(Message,'(A,F10.4)') 'Diffusion Intercept = ', lambda0
+      WRITE(Message,'(A,F10.4)') 'Diffusion Intercept = ', lambdanaught
       CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(2) = ListGetConstReal( Material , 'Powerlaw Exponent', GotIt,UnFoundFatal=UnFoundFatal)
@@ -945,18 +946,20 @@ CONTAINS
         Wn(17) = 1
       END IF
 
-      gamma0 = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
-      WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gamma0
+      gammanaught = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
+      WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gammanaught
       CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
 !------------------------------------------------------------------------------
       END SUBROUTINE GetMaterialDefs
 !------------------------------------------------------------------------------
 
+
+!------------------------------------------------------------------------------
       SUBROUTINE FabGrad( Gradient, LHS, nlm_len, NodalFabric, &
                           NodalTemperature, NodalFluidity, NodalVelo, &
                           NodMeshVel, Element, n, Nodes, Wn, rho, &
-                          lambda0,gamma0,LocalOOP23,LocalOOP13)
+                          lambdanaught,gammanaught,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
      INTEGER :: nlm_len
      REAL(KIND=dp) :: NodalVelo(:,:),NodMeshVel(:,:),NodalFabric(:,:)
@@ -978,7 +981,7 @@ CONTAINS
      REAL(KIND=dp) :: A,M, tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
      REAL(KIND=dp) :: rho,Deq,ai(6),hmax
-     REAL(KIND=dp) :: lambda0, gamma0, lambda, gammav
+     REAL(KIND=dp) :: lambdanaught, gammanaught, lambda, gammav
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
@@ -1148,19 +1151,32 @@ CONTAINS
       eps(3, 2) = SD(5)
       eps(3, 3) = SD(3)
     
-      Deq=sqrt((SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
+      Deq = sqrt((SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
                              (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
 
       ! simplest to do this in celcius
-      lambda = MIN((lambda0 + Temperature * Wn(10)) * Deq, Wn(11))
+      lambda = MIN((lambdanaught + Temperature * Wn(10)) * Deq, Wn(11))
       ! Arrhenius relations are in Kelvin
-      gammav = Min((gamma0 * EXP(-Wn(8) / (Temperature + 273.15))) * Deq, Wn(12))
+      gammav = Min((gammanaught * EXP(-Wn(8) / (Temperature + 273.15))) * Deq, Wn(12))
 
-      dndt_ROT = dndt_ij_LATROT(EPS, Spin1, 0.0_dp * Strainrate,&
+      IF (Wn(9).GT.0.0_dp) THEN
+        dndt_ROT = dndt_ij_LATROT(EPS, Spin1, 0.0_dp * Strainrate,&
                                 0.0_dp, 0.0_dp, 0.0_dp, 1.0_dp)
-      dndt_DDRX = dndt_ij_DDRX(Fabric, Stress)
-      dndt_CDRX = dndt_ij_CDRX()
-      dndt_REG = dndt_ij_REG(EPS)
+        dndt_REG = dndt_ij_REG(EPS)
+      ELSE
+        dndt_ROT = 0.0_dp
+        dndt_REG = 0.0_dp
+      END IF
+      IF (gammav.GT.0.0_dp) THEN
+        dndt_DDRX = dndt_ij_DDRX(Fabric, Stress)
+      ELSE
+        dndt_DDRX = 0.0_dp
+      END IF
+      IF (lambda.GT.0.0_dp) THEN
+        dndt_CDRX = dndt_ij_CDRX()
+      ELSE
+        dndt_CDRX = 0.0_dp
+      END IF
 
       dndt = gammav * dndt_DDRX + lambda * dndt_CDRX + Wn(9) * dndt_ROT + dndt_REG
       NodalGradient = MATMUL(dndt, Fabric)
@@ -1172,7 +1188,7 @@ CONTAINS
       END DO
       END DO ! N_Integ
        END SUBROUTINE FabGrad
-
+!------------------------------------------------------------------------------
 
 
 !------------------------------------------------------------------------------
@@ -1387,7 +1403,6 @@ CONTAINS
 !------------------------------------------------------------------------------
       END SUBROUTINE LocalJumps
 !------------------------------------------------------------------------------
-
 
 
 !------------------------------------------------------------------------------
