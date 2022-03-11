@@ -980,8 +980,8 @@ CONTAINS
 
      REAL(KIND=dp) :: A,M, tau,pe1,pe2,unorm,C0, SU(n), SW(n)
      REAL(KIND=dp) :: LoadAtIp, Temperature
-     REAL(KIND=dp) :: rho,Deq,ai(6),hmax
-     REAL(KIND=dp) :: lambdanaught, gammanaught, lambda, gammav
+     REAL(KIND=dp) :: rho,ai(6),hmax
+     REAL(KIND=dp) :: lambdanaught, gammanaught, lambda, gammav, EpsEff, LamdaEff
 
      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
 
@@ -1074,6 +1074,8 @@ CONTAINS
       StrainRate = 0.5 * ( LGrad + TRANSPOSE(LGrad) )
 
       Spin1 = 0.5 * ( LGrad - TRANSPOSE(LGrad) )
+
+      ! Need to do this in case we are 2d, for conservation of mass
       epsi = StrainRate(1,1)+StrainRate(2,2)+StrainRate(3,3)
         DO i=1,dim 
           StrainRate(i,i) = StrainRate(i,i) - epsi/dim
@@ -1151,13 +1153,17 @@ CONTAINS
       eps(3, 2) = SD(5)
       eps(3, 3) = SD(3)
     
-      Deq = sqrt((SD(1)*SD(1)+SD(2)*SD(2)+SD(3)*SD(3)+2._dp* &
-                             (SD(4)*SD(4)+SD(5)*SD(5)+SD(6)*SD(6)))/3._dp)
+      ! Note that Deq in the tensorial implementation was the Octahedral version
+      ! Instead, we use the second invariant (differs by sqrt(2/3))
+      EpsEff = sqrt((StrainRate(1,1) * StrainRate(1,1) + StrainRate(2,2) * StrainRate(2,2) &
+                    + StrainRate(3,3) * StrainRate(3,3)) / 2.0 &
+                    + StrainRate(1,2) *StrainRate(1,2) + StrainRate(1,3) * StrainRate(1,3) &
+                    + StrainRate(2,3) * StrainRate(2,3))
 
       ! simplest to do this in celcius
-      lambda = MIN((lambdanaught + Temperature * Wn(10)) * Deq, Wn(11))
+      lambda = MAX(MIN((lambdanaught + Temperature * Wn(10)) * EpsEff, Wn(11)), 0.0_dp)
       ! Arrhenius relations are in Kelvin
-      gammav = Min((gammanaught * EXP(-Wn(8) / (Temperature + 273.15))) * Deq, Wn(12))
+      gammav = MIN((gammanaught * EXP(-Wn(8) / (Temperature + 273.15))) * EpsEff, Wn(12))
 
       IF (Wn(9).GT.0.0_dp) THEN
         dndt_ROT = dndt_ij_LATROT(EPS, Spin1, 0.0_dp * Strainrate,&
