@@ -80,7 +80,7 @@
               ParentElement, LeftParent, RightParent, Edge
 
      REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm,Gravity(3), &
-         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(17)
+         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(18)
 
 
      INTEGER :: NewtonIter,NonlinearIter
@@ -946,6 +946,14 @@ CONTAINS
         Wn(17) = 1
       END IF
 
+      Wn(18) = ListGetInteger( Material, 'Stress Recryst', GotIt,UnFoundFatal=.FALSE.)
+      IF (.NOT.GotIt) THEN
+        WRITE(Message,'(A,F10.4)') &
+            'Assuming mig. recryst. in stress-preferred direction'
+        CALL INFO('FabricSolveSpectral', Message, Level = 3)
+        Wn(18) = 1
+      END IF
+
       gammanaught = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
       WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gammanaught
       CALL INFO('FabricSolveSpectral', Message, Level = 20)
@@ -1174,7 +1182,11 @@ CONTAINS
         dndt_REG = 0.0_dp
       END IF
       IF (gammav.GT.0.0_dp) THEN
-        dndt_DDRX = dndt_ij_DDRX(Fabric, Stress)
+        IF (Wn(18).GT.0.5_dp) THEN
+          dndt_DDRX = dndt_ij_DDRX(Fabric, Stress)
+        ELSE
+          dndt_DDRX = dndt_ij_DDRX(Fabric, StrainRate)
+        END IF
       ELSE
         dndt_DDRX = 0.0_dp
       END IF
