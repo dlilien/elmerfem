@@ -68,28 +68,26 @@
 !------------------------------------------------------------------------------
 !    Local variables
 !------------------------------------------------------------------------------
-     TYPE(Solver_t), POINTER :: PSolver
-
      TYPE(Matrix_t),POINTER :: StiffMatrix
 
-     INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat,spoofdim
+     INTEGER :: dim,n1,n2,i,j,k,n,t,iter,STDOFs,istat,spoofdim
 
      TYPE(ValueList_t),POINTER :: Material, BC, SolverParams
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement, Element, &
               ParentElement, LeftParent, RightParent, Edge
 
-     REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm,Gravity(3), &
-         Tdiff,Normal(3),NewtonTol,NonlinearTol,s,Wn(18)
+     REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm, &
+         NewtonTol,NonlinearTol,Wn(18)
 
 
      INTEGER :: NewtonIter,NonlinearIter
 
-     TYPE(Variable_t), POINTER :: FabricSol, TempSol, FabricVariable, FlowVariable, &
+     TYPE(Variable_t), POINTER :: FabricSol, TempSol, FlowVariable, &
                                   MeshVeloVariable,TensorFabricVariable,&
-                                  OOPlaneRotSol13,OOPlaneRotSol23,GradSol
+                                  OOPlaneRotSol13,OOPlaneRotSol23
 
-     REAL(KIND=dp), POINTER :: Temperature(:),Fabric(:), &
+     REAL(KIND=dp), POINTER :: Temperature(:), &
            FabricValues(:), FlowValues(:),TensorFabricValues(:),&
            MeshVeloValues(:), Solution(:), Ref(:), &
            OOPlaneRotValues13(:), OOPlaneRotValues23(:)
@@ -97,25 +95,19 @@
 
      INTEGER, POINTER :: TempPerm(:),FabricPerm(:),NodeIndexes(:), &
                         FlowPerm(:),MeshVeloPerm(:),TensorFabricPerm(:),&
-                        OOPlaneRotPerm13(:),OOPlaneRotPerm23(:),GradPerm(:)
+                        OOPlaneRotPerm13(:),OOPlaneRotPerm23(:)
 
      REAL(KIND=dp) :: rho,lambdanaught,gammanaught   !Interaction parameter,diffusion parameter
-     REAL(KIND=dp) :: A1plusA2
-     Real(KIND=dp), parameter :: Rad2deg=180._dp/Pi
      REAL(KIND=dp) :: a2short(5)
-     REAL(KIND=dp) :: ai(3), Angle(3)
 
-     LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
-     LOGICAL :: OOPlaneRot13
-     LOGICAL :: OOPlaneRot23, zero_order
+     LOGICAL :: GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
+     LOGICAL :: OOPlaneRot13, OOPlaneRot23
 
-     INTEGER :: body_id,bf_id,eq_id, comp, realcomp, Indexes(128)
+     INTEGER :: body_id, comp, realcomp, Indexes(128)
 !
      INTEGER :: old_body = -1, prev_comps, spectral_l, spectral_m
 
-     REAL(KIND=dp) :: FabricGrid(4879)
-                        
-     LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE., FreeSurface
+     LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE.
 
      TYPE(Variable_t), POINTER :: TimeVar
 
@@ -123,26 +115,25 @@
        LocalFluidity(:), LOAD(:,:),Force(:), LocalTemperature(:), &
        Alpha(:,:),Beta(:), &
        Velocity(:,:), MeshVelocity(:,:), LocalOOP13(:), LocalOOP23(:), &
-       LocalA4(:,:),ElGradVals(:,:,:),LocalGrad(:, :),LocalFabric(:,:),&
+       ElGradVals(:,:,:),LocalGrad(:, :),LocalFabric(:,:),&
        LocalLHS(:, :), ElLHSVals(:, :, :)
      COMPLEX(KIND=dp), ALLOCATABLE:: nlm(:)
 
      SAVE MASS, STIFF, LOAD, Force,ElementNodes,Alpha,Beta, & 
           LocalTemperature, LocalFluidity,  AllocationsDone, &
-          Wn,  FabricGrid, rho, lambdanaught, Velocity, &
+          Wn, rho, lambdanaught, Velocity, &
           MeshVelocity, old_body, dim, comp, LocalOOP13, LocalOOP23, &
           spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad,gammanaught,&
           LocalFabric, LocalLHS, ElLHSVals, nlm
 !------------------------------------------------------------------------------
-     CHARACTER(LEN=MAX_NAME_LEN) :: viscosityFile, TempVar, &
-     OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
+     CHARACTER(LEN=MAX_NAME_LEN) :: TempVar, OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
 
-     REAL(KIND=dp) :: Bu,Bv,Bw,RM(3,3), SaveTime = -1
+     REAL(KIND=dp) :: SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
 
      INTEGER :: LCap, fab_len
 
-     SAVE  ViscosityFile, PrevFabric, CurrFabric,TempFabVal, LCap, fab_len
+     SAVE  PrevFabric, CurrFabric,TempFabVal, LCap, fab_len
 #ifdef USE_ISO_C_BINDINGS
      REAL(KIND=dp) :: at, at0
 #else
@@ -440,13 +431,12 @@
         END IF
        IF (spoofdim.gt.dim) THEN
          CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
-                       LocalTemperature, LocalFluidity,  Velocity, &
-                       MeshVelocity, CurrentElement, n, ElementNodes, &
+                       LocalTemperature, Velocity, CurrentElement, n, ElementNodes, &
                        Wn, rho, lambdanaught, gammanaught, LocalOOP23, LocalOOP13)
        ELSE
          CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
-                       LocalTemperature, LocalFluidity,  Velocity, &
-                       MeshVelocity, CurrentElement, n, ElementNodes, &
+                       LocalTemperature, Velocity, &
+                       CurrentElement, n, ElementNodes, &
                        Wn, rho, lambdanaught, gammanaught)
        END IF
          ElGradVals(t, :, :) = LocalGrad(:, :)
@@ -831,20 +821,12 @@ CONTAINS
 !------------------------------------------------------------------------------
       SUBROUTINE GetMaterialDefs()
 
-      viscosityFile = ListGetString( Material ,'Viscosity File',GotIt, UnFoundFatal)
-      OPEN( 1, File = viscosityFile)
-      DO i=1,813
-         READ( 1, '(6(e14.8))' ) FabricGrid( 6*(i-1)+1:6*(i-1)+6 )
-      END DO
-      READ(1 , '(e14.8)' ) FabricGrid(4879)
-      CLOSE(1)
-
        rho = ListGetConstReal(Material, 'Interaction Parameter', GotIt )
        IF (.NOT.GotIt) THEN
            WRITE(Message,'(A)') 'Interaction  Parameter notfound. &
-                         &Setting to the value in ViscosityFile'
+                         &Setting to zero'
            CALL INFO('FabricSolveSpectral', Message, Level = 20)
-           rho = FabricGrid(4879)
+           rho = 0.0_dp
        ELSE
            WRITE(Message,'(A,F10.4)') 'Interaction Parameter = ', rho
            CALL INFO('FabricSolveSpectral', Message, Level = 20)
@@ -966,41 +948,36 @@ CONTAINS
 
 !------------------------------------------------------------------------------
       SUBROUTINE FabGrad( Gradient, LHS, nlm_len, NodalFabric, &
-                          NodalTemperature, NodalFluidity, NodalVelo, &
-                          NodMeshVel, Element, n, Nodes, Wn, rho, &
+                          NodalTemperature, NodalVelo, &
+                          Element, n, Nodes, Wn, rho, &
                           lambdanaught,gammanaught,LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
      INTEGER :: nlm_len
-     REAL(KIND=dp) :: NodalVelo(:,:),NodMeshVel(:,:),NodalFabric(:,:)
-     REAL(KIND=dp), DIMENSION(:) :: NodalTemperature, NodalFluidity
+     REAL(KIND=dp) :: NodalVelo(:,:),NodalFabric(:,:)
+     REAL(KIND=dp), DIMENSION(:) :: NodalTemperature
      REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
      REAL(KIND=dp), Intent(OUT) :: Gradient(:,:), LHS(:,:)
 
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t) :: Element
-     INTEGER :: n, Comp
+     INTEGER :: n
 !------------------------------------------------------------------------------
 !
      REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
      REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
 
-     REAL(KIND=dp) :: Theta
-     REAL(KIND=dp) :: OOP23
+     REAL(KIND=dp) :: Temperature
+     REAL(KIND=dp) :: rho
+     REAL(KIND=dp) :: lambdanaught, gammanaught, lambda, gammav, EpsEff
 
-     REAL(KIND=dp) :: A,M, tau,pe1,pe2,unorm,C0, SU(n), SW(n)
-     REAL(KIND=dp) :: LoadAtIp, Temperature
-     REAL(KIND=dp) :: rho,ai(6),hmax
-     REAL(KIND=dp) :: lambdanaught, gammanaught, lambda, gammav, EpsEff, LamdaEff
+     INTEGER :: i,j,t,dim,NBasis,spoofdim
 
-     INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),spoofdim,DOFs = 1
-
-     REAL(KIND=dp) :: s,u,v,w, Radius, B(6,3), G(3,6)
-     REAL(KIND=dp) :: Wn(:),Velo(3),DStress(6),StrainR(6),Spin(3),SD(6)
+     REAL(KIND=dp) :: s,u,v,w
+     REAL(KIND=dp) :: Wn(:),SD(6)
 
      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),epsi,SR(3,3)
-     REAL(KIND=dp) :: ap(3),Spin1(3,3),Stress(3,3),eps(3,3)
+     REAL(KIND=dp) :: Spin1(3,3),Stress(3,3),eps(3,3)
 
-     REAL(KIND=dp) :: SStar(3,3), SStarMean, TrS
      COMPLEX(KIND=dp) :: Fabric(nlm_len), NodalGradient(nlm_len)
      COMPLEX(KIND=dp) :: dndt(nlm_len, nlm_len), dndt_ROT(nlm_len, nlm_len),&
                          dndt_DDRX(nlm_len, nlm_len), dndt_CDRX(nlm_len,nlm_len),&
@@ -1014,7 +991,6 @@ CONTAINS
 
      ! For new orthotropic law
      REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
-     REAL(KIND=dp) :: A_specfab
 
 
       INTERFACE
@@ -1072,7 +1048,6 @@ CONTAINS
                          SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
                          KIND=dp)
       END DO
-      Theta = 1._dp / ( FabricGrid(5) + FabricGrid(6) )
       
       Stress = 0.0
       StrainRate = 0.0
@@ -1125,32 +1100,19 @@ CONTAINS
       do i = 1,3
         do j = 1,3
             if (i.ne.j) then
+                Stress(i,j) = stress(i,j) / 4.0_dp
+            else
                 Stress(i,j) = stress(i,j) / 2.0_dp
             end if
         end do
       end do
-
-      SStar = 0.0
-      TrS = 0.0
-      DO k = 1, 2 * spoofdim
-        TrS = TrS + Stress(INDi(k), INDj(k)) * Stress(INDj(k), INDi(k))
-        IF (k > 3) TrS = TrS + Stress(INDi(k), INDj(k)) * Stress(INDj(k), INDi(k))
-      END DO
-      IF (TrS.GE.1.0e-16) THEN
-        DO k = 1, 2*spoofdim
-          DO j = 1, 2*spoofdim
-            SStar( INDi(k),INDj(k) ) = 5.0_dp * (Stress( INDi(k),INDj(k) )) / TrS
-          END DO
-          IF (k > 3)  SStar( INDj(k),INDi(k) ) = SStar( INDi(k),INDj(k) )
-        END DO
-      END IF
 
 !     SD=(1-r)D + r psi/2 S :
 !     -----------------------
       SD=0._dp
       DO i=1,2*spoofdim
         SD(i)= (1._dp - rho)*StrainRate(INDi(i),INDj(i)) + rho *&
-                                   Theta *  Stress(INDi(i),INDj(i))
+                                Stress(INDi(i),INDj(i))
       END DO
       eps(1, 1) = SD(1)
       eps(1, 2) = SD(4)
@@ -1229,8 +1191,8 @@ CONTAINS
       REAL(KIND=dp) :: dBasisdx(2*n,3),SqrtElementMetric
       REAL(KIND=dp) :: A,M,unorm,C0
       REAL(KIND=dp) :: LoadAtIp
-      INTEGER :: i,j,k,p,q,t,dim,NBasis,ind(3),N_Integ
-      REAL(KIND=dp) :: s,u,v,w, Radius, Velo(3)
+      INTEGER :: i,j,p,q,t,dim,NBasis,N_Integ
+      REAL(KIND=dp) :: s,u,v,w,Velo(3)
       REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
       LOGICAL :: stat
       TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
@@ -1298,8 +1260,6 @@ CONTAINS
         END DO
       END DO 
 
- 1000 FORMAT((a),x,i2,x,6(e13.5,x)) 
- 1001 FORMAT(6(e13.5,x))
 !------------------------------------------------------------------------------
        END SUBROUTINE LocalMatrix
 !------------------------------------------------------------------------------
@@ -1312,7 +1272,7 @@ CONTAINS
         INTEGER :: nEdge, nParent
         REAL( KIND=dp ) :: U, V, W, Basis(:)
         !------------------------------------------------------------------------------
-        INTEGER :: i, j,l
+        INTEGER :: i, j
         REAL(KIND=dp) :: NodalParentU(nEdge),NodalParentV(nEdge),NodalParentW(nEdge)
         !------------------------------------------------------------------------------
         DO i = 1,nEdge
@@ -1344,11 +1304,11 @@ CONTAINS
       REAL(KIND=dp) :: LeftBasis(n1), LeftdBasisdx(n1,3), LeftddBasisddx(n1,3,3)
       REAL(KIND=dp) :: RightBasis(n2), RightdBasisdx(n2,3), RightddBasisddx(n2,3,3)
       REAL(KIND=dp) :: Jump(n1+n2), Average(n1+n2)
-      REAL(KIND=dp) :: detJ, U, V, W, S, Udotn, xx, yy
+      REAL(KIND=dp) :: detJ, U, V, W, S, Udotn
       LOGICAL :: Stat
-      INTEGER :: i, j, p, q, dim, t, nEdge, nParent
+      INTEGER :: i, p, q, dim, t
       TYPE(GaussIntegrationPoints_t) :: IntegStuff
-      REAL(KIND=dp) :: hE, Normal(3), cu(3), LeftOut(3)
+      REAL(KIND=dp) :: Normal(3), cu(3), LeftOut(3)
 
       TYPE(Nodes_t) :: EdgeNodes, LeftParentNodes, RightParentNodes
 
@@ -1435,9 +1395,9 @@ CONTAINS
 !------------------------------------------------------------------------------
      REAL(KIND=dp) :: Basis(n), dBasisdx(n,3), ddBasisddx(n,3,3)
      REAL(KIND=dp) :: ParentBasis(np), ParentdBasisdx(np,3), ParentddBasisddx(np,3,3)
-     INTEGER :: i,j,p,q,t,dim
+     INTEGER :: i,p,q,t,dim
 
-     REAL(KIND=dp) :: Normal(3), g, L, Udotn, UdotnA, cu(3), detJ,U,V,W,S
+     REAL(KIND=dp) :: Normal(3), L, Udotn, UdotnA, cu(3), detJ,U,V,W,S
      LOGICAL :: Stat
      TYPE(GaussIntegrationPoints_t) :: IntegStuff
 
