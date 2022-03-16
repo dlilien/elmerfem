@@ -483,7 +483,8 @@
          IF ((spectral_m == 0).AND.(Comp.GT.RealComp)) CYCLE outer
 
          ! Cycle if odd order and no out of page
-         IF ((spoofdim.le.2).AND.(mod(spectral_m, 2) == 1)) CYCLE outer
+         IF ((spoofdim.le.2).AND.(mod(spectral_m, 2) == 1).AND.(&
+            .NOT.OOPlaneRot13).AND.(.NOT.OOPlaneRot23)) CYCLE outer
 
        Solver % Variable % Values = CurrFabric( COMP::fab_len )
        IF ( TransientSimulation ) THEN
