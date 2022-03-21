@@ -748,6 +748,20 @@
       DEALLOCATE( Ref )
       END DO outer ! End DO Comp
 
+      ! Explicitly check bounds on nlm to make sure we do not exceed
+      ! possible values
+      DO i=1,n1
+         j = FabricPerm(i)
+         IF (j < 1) CYCLE
+         nlm = CMPLX(FabricValues(fab_len * (j - 1) + 1:fab_len * (j - 1) + fab_len / 2),&
+                FabricValues(fab_len * (j - 1) + fab_len / 2 + 1:fab_len * j),&
+                KIND=dp)
+         nlm = apply_bounds(nlm)
+         FabricValues(fab_len * (j - 1) + 1:fab_len * (j - 1) + fab_len / 2) = Real(nlm)
+         FabricValues(fab_len * (j - 1) + fab_len / 2 + 1:fab_len * j) = AImag(nlm)
+      END DO
+
+      ! Reset current fabric
        DO i=1,Solver % NumberOFActiveElements
           CurrentElement => GetActiveElement(i)   
           n = GetElementDOFs( Indexes )
@@ -1044,7 +1058,7 @@ CONTAINS
       Temperature = SUM( NodalTemperature(1:n) * Basis(1:n) ) 
 
       DO i=1,nlm_len
-       Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
+        Fabric(i) = CMPLX(SUM(NodalFabric(i,1:n)*Basis(1:n)), &
                          SUM(NodalFabric(i + nlm_len,1:n)*Basis(1:n)),&
                          KIND=dp)
       END DO
