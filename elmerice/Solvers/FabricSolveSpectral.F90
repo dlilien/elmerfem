@@ -1110,7 +1110,7 @@ CONTAINS
       do i = 1,3
             SR(i,i) = SR(i,i) / 2.0_dp
       end do
-      Stress = tau_of_eps__orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij)
+      Stress = rheo_rev_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij)
       do i = 1,3
         do j = 1,3
             if (i.ne.j) then
@@ -1151,24 +1151,23 @@ CONTAINS
       gammav = MIN((gammanaught * EXP(-Wn(8) / (Temperature + 273.15))) * EpsEff, Wn(12))
 
       IF (Wn(9).GT.0.0_dp) THEN
-        dndt_ROT = dndt_ij_LATROT(EPS, Spin1, 0.0_dp * Strainrate,&
-                                0.0_dp, 0.0_dp, 0.0_dp, 1.0_dp)
-        dndt_REG = dndt_ij_REG(EPS)
+        dndt_ROT = M_LROT(EPS, Spin1, 1.0_dp, 0.0_dp)
+        dndt_REG = M_REG(EPS)
       ELSE
         dndt_ROT = 0.0_dp
         dndt_REG = 0.0_dp
       END IF
       IF (gammav.GT.0.0_dp) THEN
         IF (Wn(18).GT.0.5_dp) THEN
-          dndt_DDRX = dndt_ij_DDRX(Fabric, Stress)
+          dndt_DDRX = M_DDRX(Fabric, Stress)
         ELSE
-          dndt_DDRX = dndt_ij_DDRX(Fabric, StrainRate)
+          dndt_DDRX = M_DDRX(Fabric, StrainRate)
         END IF
       ELSE
         dndt_DDRX = 0.0_dp
       END IF
       IF (lambda.GT.0.0_dp) THEN
-        dndt_CDRX = dndt_ij_CDRX()
+        dndt_CDRX = M_CDRX()
       ELSE
         dndt_CDRX = 0.0_dp
       END IF
