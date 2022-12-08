@@ -31,7 +31,7 @@
 ! *           02101 Espoo, Finland 
 ! *
 ! *  Original Date: 08 Jun 1997
-! *  Modified by: Peter Råback
+! *  Modified by: Peter Raback
 ! *  Modification date: 14.1.2010
 ! *
 ! *****************************************************************************/
@@ -260,7 +260,7 @@ SUBROUTINE TransientPhaseChange( Model,Solver,dt,TransientSimulation )
     IF ( istat /= 0 ) CALL Fatal( 'TransientPhaseChange', 'Memory allocation error 1.' )     
     
 
-    ! Check whether normals are computed by an auxialiary solver
+    ! Check whether normals are computed by an auxiliary solver
     !---------------------------------------------------------------------------------
     VariableName = ListGetString( Params, 'Normal Variable', Stat )
     IF(Stat) THEN
@@ -619,7 +619,7 @@ CONTAINS
         ! do nothing, loads already inserted
 
       ELSE 
-        ! Compute the flux from normal derivaties
+        ! Compute the flux from normal derivatives
         TGrad = 0.0d0          
         l = 0
         DO i=1,2

@@ -4,51 +4,6 @@ SET(WITH_ScatteredDataInterpolator FALSE CACHE BOOL "Include ElmerIce ScatteredD
 MARK_AS_ADVANCED(WITH_ScatteredDataInterpolator)
 
 # ---------------------- #
-# -- NetCDF libraries -- #
-#----------------------- #
-MESSAGE(STATUS "------------------------------------------------")
-MESSAGE(STATUS "Elmer/Ice package: Looking for [NetCDF] & [NetCDF Fortran] libraries")
-
-FIND_PACKAGE(NetCDF)
-
-IF(NetCDF_FOUND)
-
-  SET(HAVE_NETCDF TRUE)
-  MARK_AS_ADVANCED(HAVE_NETCDF)
-  INCLUDE_DIRECTORIES(${NetCDF_INCLUDE_DIR})
-  ADD_DEFINITIONS(-DHAVE_NETCDF)
-
-  MESSAGE(STATUS "  NetCDF:           " "${NetCDF_FOUND}")
-  MESSAGE(STATUS "  NetCDF_INC:       " "${NetCDF_INCLUDE_DIR}")
-  MESSAGE(STATUS "  NetCDF_LIBS:     " "${NetCDF_LIBRARIES}")
-ELSE()
-  MESSAGE(STATUS "Library not found: >NetCDF_FOUND< ")
-  MESSAGE(WARNING "  \n Missing: >NetCDF_INCLUDE_DIR< , >NetCDF_LIBRARY<,  >NetCDFF_LIBRARY< \n some functionalities will be disabled")
-ENDIF(NetCDF_FOUND)
-
-# ---------------------- #
-# -- HDF5 libraries -- #
-#----------------------- #
-MESSAGE(STATUS "------------------------------------------------")
-MESSAGE(STATUS "Elmer/Ice package: Looking for [HDF5] & [HDF5 Fortran] libraries")
-
-FIND_PACKAGE(PHDF5)
-
-IF(PHDF5_FOUND)
-
-  SET(HAVE_HDF5 TRUE)
-  MARK_AS_ADVANCED(HAVE_HDF5)
-  INCLUDE_DIRECTORIES(${PHDF5_INCLUDE_DIR})
-  ADD_DEFINITIONS(-DHAVE_HDF5)
-
-  MESSAGE(STATUS "  HDF5:           " "${PHDF5_FOUND}")
-  MESSAGE(STATUS "  HDF5_INC:       " "${PHDF5_INCLUDE_DIR}")
-  MESSAGE(STATUS "  HDF5_LIBS:     " "${PHDF5_LIBRARIES}")
-ELSE()
-  MESSAGE(STATUS "Library not found: >HDF5_FOUND< ")
-  MESSAGE(WARNING "  \n Missing: >HDF5_INCLUDE_DIR< , >HDF5_LIBRARY<,  >HDF5F_LIBRARY< \n some functionalities will be disabled")
-ENDIF(PHDF5_FOUND)
-
 FIND_PACKAGE(SpecFab)
 IF(SpecFab_FOUND)
     SET(HAVE_SpecFab TRUE)
@@ -89,17 +44,26 @@ SET(ElmerIce_SRC ElmerIceUtils.F90 AIFlowSolve_nlD2.F90 AIFlowSolve_nlS2.F90
     IntegrateVertically.F90 EnthalpySolver.F90 SubShelfMelt.F90
     ./Adjoint/Adjoint_LinearSolver.F90
     ./Adjoint/Adjoint_CostContSolver.F90 ./Adjoint/Adjoint_CostRegSolver.F90 
-    ./Adjoint/Adjoint_GradientValidation.F90 
+    ./Adjoint/Adjoint_GradientValidation.F90
+    ./AdjointStokes/AdjointStokes_GradientMu.F90 
     ./AdjointStokes/AdjointStokes_GradientBetaSolver.F90  
     ./AdjointSSA/AdjointSSA_AdjointSolver.F90
     ./AdjointSSA/AdjointSSA_CostRegSolver.F90 ./AdjointSSA/AdjointSSA_SSASolver.F90
     ./AdjointSSA/AdjointSSA_CostContSolver.F90 ./AdjointSSA/AdjointSSA_CostFluxDivSolver.F90
     ./AdjointSSA/AdjointSSA_CostTaubSolver.F90
-    ./AdjointSSA/AdjointSSA_GradientSolver.F90 PermafrostMaterials.F90 Permafrost.F90
+    ./AdjointSSA/AdjointSSA_GradientSolver.F90 
+    ./AdjointThickness/AdjointThickness_GradientSolver.F90   ./AdjointThickness/AdjointThickness_ThicknessSolver.F90
+    ./Permafrost/PermafrostMaterials.F90 ./Permafrost/Permafrost_Utils.F90 ./Permafrost/Permafrost_HTEQ.F90
+    ./Permafrost/Permafrost_Darcy.F90 ./Permafrost/Permafrost_solute.F90 ./Permafrost/Permafrost_solid.F90
     SurfaceBoundaryEnthalpy.F90
-    FrontDisplacement.F90 
-    TwoMeshes.F90 Emergence.F90 SSAmask.F90 
-    GlaDSCoupledSolver.F90 GlaDSchannelSolver.F90 Flotation.F90)
+    Calving.F90 FrontDisplacement.F90 
+    TwoMeshes.F90 ProjectCalving.F90 ComputeCalvingNormal.F90 
+    CalvingGeometry.F90 Calving3D.F90 Calving3D_lset.F90 CalvingGlacierAdvance3D.F90 CalvingRemesh.F90
+    CalvingFrontAdvance3D.F90 Emergence.F90 SSAmask.F90 
+    GlaDSCoupledSolver.F90 GlaDSchannelSolver.F90 Flotation.F90
+    BasalMelt3D.F90 CalvingHydroInterp.F90 HydroRestart.F90 
+    GMValid.F90 Scalar_OUTPUT_Glacier.F90 IcyMaskSolver.F90)
+
 
 IF(HAVE_SpecFab)
     MESSAGE(STATUS "Adding Specs")
@@ -112,6 +76,14 @@ ENDIF()
 
 IF(HAVE_MMG)
   SET(ElmerIce_SRC ${ElmerIce_SRC} CalvingRemeshMMG.F90 ) #MMG3DSolver.F90 <- defunct?
+ENDIF()
+
+IF(HAVE_XIOS)
+  SET(ElmerIce_SRC ${ElmerIce_SRC} OutPutSolvers/XIOSOutputSolver.F90)
+ENDIF()
+
+IF(HAVE_NETCDF)
+  SET(ElmerIce_SRC ${ElmerIce_SRC} UGridDataReader.F90)
 ENDIF()
 
 ADD_LIBRARY(ElmerIceSolvers SHARED ${ElmerIce_SRC})
@@ -140,16 +112,20 @@ IF(NOT(WIN32))
     SET_TARGET_PROPERTIES(ElmerIceSolvers PROPERTIES
                           INSTALL_RPATH_USE_LINK_PATH TRUE)
 ENDIF()
-TARGET_LINK_LIBRARIES(ElmerIceSolvers elmersolver)
+TARGET_LINK_LIBRARIES(ElmerIceSolvers elmersolver ElmerIceUtils)
 
 IF(HAVE_NETCDF)
-    TARGET_LINK_LIBRARIES(ElmerIceSolvers ${NetCDF_LIBRARIES})
+  TARGET_LINK_LIBRARIES(ElmerIceSolvers ${NetCDF_LIBRARIES})
 ENDIF()
 IF(HAVE_SpecFab)
-    TARGET_LINK_LIBRARIES(ElmerIceSolvers ${SpecFab_LIBRARIES})
+  TARGET_LINK_LIBRARIES(ElmerIceSolvers ${SpecFab_LIBRARIES})
 ENDIF()
 IF(HAVE_HDF5)
-    TARGET_LINK_LIBRARIES(ElmerIceSolvers ${PHDF5_LIBRARIES})
+  TARGET_LINK_LIBRARIES(ElmerIceSolvers ${PHDF5_LIBRARIES})
+ENDIF()
+IF(HAVE_XIOS)
+  INCLUDE_DIRECTORIES(${XIOS_INCLUDE_DIR})
+  TARGET_LINK_LIBRARIES(ElmerIceSolvers ${XIOS_LIBRARIES})
 ENDIF()
 # IF(HAVE_MMG)
 #   TARGET_LINK_LIBRARIES(ElmerIceSolvers ${MMG_LIBRARY})

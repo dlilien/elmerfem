@@ -86,13 +86,6 @@
      TYPE(Solver_t), POINTER :: Solver
 
 !------------------------------------------------------------------------------
-!    For sgi machines reset the output unit to line buffering, so that
-!    Elmercadi, etc, can follow progress, even if output is to a file.
-!------------------------------------------------------------------------------
-#ifdef SGI
-     CALL SetLineBuf(6)
-#endif
-!------------------------------------------------------------------------------
 !    Read input file name and whether parallel execution is requested
 !------------------------------------------------------------------------------
 
@@ -135,7 +128,7 @@
 !    Anyway, to be on the safe side, if the simulation  is time dependent,
 !    change the number of integration points  here.
 !
-!    NOTE: THIS DOESN´T FIX THE PROBLEM FOR THE KE Model
+!    NOTE: THIS DOESN'T FIX THE PROBLEM FOR THE KE Model
 !------------------------------------------------------------------------------
      eq = ListGetString( CurrentModel % Simulation, 'Simulation Type' )
      TransientSimulation = .FALSE.

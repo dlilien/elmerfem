@@ -384,6 +384,9 @@ MODULE Integration
           0.183673469387755d0, 0.183673469387755d0 /)
 !------------------------------------------------------------------------------
 ! Quadrilateral - 12-point rule for complete polynomials of order p<=7
+! NOTE: It seems that this rule may give somehow faulty results at least
+!       for some serendipity polynomials of degree 3. Therefore
+!       we never use it. 
 !------------------------------------------------------------------------------
    REAL(KIND=dp), DIMENSION(12), PRIVATE :: UPQuad12 = &
        (/ 0.925820099772551d0, -0.925820099772551d0,  0.000000000000000d0, &
@@ -2487,15 +2490,24 @@ CONTAINS
 !       p => IntegStuff(thread)
       p => IntegStuff
 
-      n = REAL(np)**(1.0D0/3.0D0) + 0.5D0
-
-      IF ( n < 1 .OR. n > MAXN ) THEN
-        p % n = 0
-        WRITE( Message, * ) 'Invalid number of points: ', n
-        CALL Error( 'GaussPointsBrick', Message )
-        RETURN
-      END IF
-
+      SELECT CASE( np )
+      CASE( 8 )
+        n = 2
+      CASE( 27 )
+        n = 3
+      CASE( 64 )
+        n = 4
+      CASE DEFAULT
+        n = REAL(np)**(1.0D0/3.0D0) + 0.5D0
+        
+        IF ( n < 1 .OR. n > MAXN ) THEN
+          p % n = 0
+          WRITE( Message, * ) 'Invalid number of points: ', n
+          CALL Error( 'GaussPointsBrick', Message )
+          RETURN
+        END IF
+      END SELECT
+        
       t = 0
       DO i=1,n
         DO j=1,n
@@ -2639,7 +2651,13 @@ CONTAINS
          ! An explicit bubble augmentation with lower-order methods switches to
          ! the standard rule:
          IF (elm % BDOFs > 0 .AND. elm % PDefs % P < 4) Economic = .FALSE.
-         IntegStuff = GaussPointsQuad(n, Economic)
+         ! The economic 12-point rule appears to be somehow faulty, so we 
+         ! shall never call it
+         IF (Economic .AND. n==12) THEN
+           IntegStuff = GaussPointsQuad(16)
+         ELSE
+           IntegStuff = GaussPointsQuad(n, Economic)
+         END IF
        ELSE
          IntegStuff = GaussPointsQuad(n)
        END IF
@@ -2695,17 +2713,18 @@ CONTAINS
             RETURN
           END IF
         END IF
-
+        
         IF (pElement) THEN
            IntegStuff = GaussPointsPWedge(n)
         ELSE
            IntegStuff = GaussPointsWedge(n)
         END IF
 
-     CASE (8)
-        IntegStuff = GaussPointsBrick(n)
+     CASE (8)       
+       IntegStuff = GaussPointsBrick(n)
+       
      END SELECT
-
+       
    END FUNCTION GaussPoints
 
 
@@ -2781,6 +2800,48 @@ CONTAINS
    END FUNCTION EdgeElementGaussPoints
 !------------------------------------------------------------------------------
 
+   SUBROUTINE ConvertToPReference(ElementCode,u,v,w,s)
+     INTEGER :: ElementCode
+     REAL(KIND=dp) :: u,v,w
+     REAL(KIND=dp), OPTIONAL :: s
+          
+     
+     SELECT CASE( ElementCode / 100 )
+
+     CASE(1,2,4,8)
+       ! Nothing to do, reference element is the same
+       
+     CASE(3)
+       ! triangle
+       u = 2*u + v - 1
+       v = SQRT(3.0_dp)*v
+       IF( PRESENT(s) ) s = SQRT(3.0_dp)*2*s
+        
+     CASE(5)
+       ! tetrahedron
+       u = 2*u + v + w - 1
+       v = SQRT(3._dp)*v + 1/SQRT(3._dp)*w
+       w = 2*SQRT(2/3._dp)*w
+       IF(PRESENT(s)) s = 4*SQRT(2.0d0)*s       
+
+     CASE(6) 
+       ! pyramid
+       w = SQRT(2._dp)*w
+       ! scaling of s??
+       
+     CASE(7)
+       ! wedge / prism
+       u = 2*u + v - 1
+       v = SQRT(3._dp)*v
+       IF(PRESENT(s)) s = 2*SQRT(3.0d0) * s       
+
+     CASE DEFAULT
+       CALL Fatal('Integration::ConvertToPReference','Unsupported element type')
+     END SELECT
+            
+     
+   END SUBROUTINE ConvertToPReference
+   
 
 !---------------------------------------------------------------------------
 END MODULE Integration

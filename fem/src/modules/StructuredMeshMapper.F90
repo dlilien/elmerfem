@@ -91,7 +91,8 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
        DisplacementMode, MaskExists, GotVeloVar, GotUpdateVar, Tangled,&
        DeTangle, ComputeTangledMask = .FALSE., Reinitialize, &
        MidLayerExists, WriteMappedMeshToDisk = .FALSE., GotBaseVar, &
-       BaseDisplaceFirst, RecompStab, MapHeight, BotProj
+       BaseDisplaceFirst, RecompStab, RecompStabExe = .FALSE., &
+       MapHeight, BotProj
   REAL(KIND=dp) :: UnitVector(3),x0loc,x0bot,x0top,x0mid,xloc,wtop,BotVal,TopVal,&
        TopVal0, BotVal0, MidVal, RefVal, ElemVector(3),DotPro,Eps,Length, MinHeight
   REAL(KIND=dp) :: at0,at1,at2,dx
@@ -103,7 +104,7 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
   TYPE(ValueList_t),POINTER :: BC
 
   INTEGER, POINTER :: FixedLayers(:),UpPointer(:),DownPointer(:),NodeLayer(:)
-  INTEGER :: NumberOfLayers, NumberOfFixedLayers
+  INTEGER :: NumberOfLayers, NumberOfFixedLayers, RecompStabInterval, Cnt=0
   LOGICAL :: MultiLayer
 
   CHARACTER(*), PARAMETER :: Caller = 'StructuredMeshMapper'
@@ -112,7 +113,8 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
   SAVE Visited,Initialized,UnitVector,Coord,MaskExists,MaskPerm,TopPointer,BotPointer,&
       TopMode,BotMode,TopField,BotField,TopPerm,BotPerm,Field,Surface,nsize,nnodes,OrigCoord, &
       ComputeTangledMask, MidPointer, MidLayerExists,&
-      UpPointer,DownPointer,NodeLayer,NumberOfLayers
+      UpPointer,DownPointer,NodeLayer,NumberOfLayers, &
+      RecompStabExe, Cnt
 
   CALL Info( Caller,'---------------------------------------',Level=4 )
   CALL Info( Caller,'Performing mapping on a structured mesh ',Level=4 )
@@ -135,7 +137,24 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
   END IF
   
   RecompStab = ListGetLogical(SolverParams, "Recompute Stabilization", Found)
-
+  IF(.NOT. Found) THEN
+    CALL Info(Caller,'Defaulting "Recompute Stabilization" to True.',Level=8)
+    RecompStab = .TRUE.
+  END IF
+  IF (RecompStab) THEN
+    RecompStabInterval = ListGetInteger(SolverParams, "Recompute Stabilization Interval", Found)
+    IF (.NOT.Found) RecompStabInterval = 1
+    Cnt = Cnt + 1
+    IF (Cnt == RecompStabInterval) THEN
+      Cnt = 0
+      RecompStabExe = .TRUE.
+    ELSE
+      RecompStabExe = .FALSE.
+    END IF
+  ELSE
+    RecompStabExe = .FALSE.
+  END IF
+    
   FixedLayers => ListGetIntegerArray( SolverParams,'Fixed Layer Indexes',MultiLayer)
   NumberOfFixedLayers = SIZE( FixedLayers )
 
@@ -233,7 +252,14 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
         CALL Fatal(Caller,'Sizes must agree: '//TRIM(VarName))
       END IF
     ELSE
-      CALL DefaultVariableAdd( VarName, Perm = MaskPerm, Var = VeloVar ) 
+      n = len_TRIM(VarName)
+      ! Create full vector if the field is given by component
+      IF( VERIFY( VarName(n:n),'123') == 0 ) THEN
+        CALL DefaultVariableAdd( VarName(1:n-1), dofs = dim, Perm = MaskPerm )
+        VeloVar => VariableGet( Mesh % Variables, VarName ) 
+      ELSE
+        CALL DefaultVariableAdd( VarName, Perm = MaskPerm, Var = VeloVar ) 
+      END IF
     END IF
   END IF
 
@@ -250,7 +276,14 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
         CALL Fatal(Caller,'Sizes must agree: '//TRIM(VarName))
       END IF
     ELSE
-      CALL DefaultVariableAdd( VarName, Perm = MaskPerm, Var = UpdateVar ) 
+      n = len_TRIM(VarName)
+      ! Create full vector if the field is given by component
+      IF( VERIFY( VarName(n:n),'123') == 0 ) THEN
+        CALL DefaultVariableAdd( VarName(1:n-1), dofs = dim, Perm = MaskPerm )
+        UpdateVar => VariableGet( Mesh % Variables, VarName ) 
+      ELSE
+        CALL DefaultVariableAdd( VarName, Perm = MaskPerm, Var = UpdateVar )
+      END IF
     END IF
   END IF
   
@@ -276,8 +309,8 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
     CALL BinaryLayerMapper()
   END IF
 
-  LimitedCount = NINT( ParallelReduction(1.0_dp * LimitedCount) )
-  TangledCount = NINT( ParallelReduction(1.0_dp * TangledCount) )
+  LimitedCount = ParallelReduction(LimitedCount) 
+  TangledCount = ParallelReduction(TangledCount) 
   
   IF( LimitedCount > 0 ) THEN
     CALL Info(Caller,'There seems to be '&
@@ -339,7 +372,7 @@ SUBROUTINE StructuredMeshMapper( Model,Solver,dt,Transient )
 
   Visited = .TRUE.
   
-  IF(RecompStab) CALL MeshStabParams(Mesh)
+  IF(RecompStabExe) CALL MeshStabParams(Mesh)
 
 CONTAINS
 

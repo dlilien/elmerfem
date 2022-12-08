@@ -1232,7 +1232,7 @@ int Meshutils::divideEdgeBySharpPoints(mesh_t *mesh)
   }
 
   if ( count==0 ) {
-    cout << "No boundary edges to divde." << endl;
+    cout << "No boundary edges to divide." << endl;
     return 0;
   }
 
@@ -1439,7 +1439,7 @@ int Meshutils::divideSurfaceBySharpEdges(mesh_t *mesh)
   }
 
   if ( count==0 ) {
-    cout << "No boundary surfaces to divde." << endl;
+    cout << "No boundary surfaces to divide." << endl;
     return 0;
   }
 
@@ -1957,7 +1957,7 @@ void Meshutils::increaseElementOrder(mesh_t *mesh)
     delete [] hash;
   }
 
-  // Then redifine the mesh using the additional nodes
+  // Then redefine the mesh using the additional nodes
   int quadnodes = mesh->getNodes() + noedges;  
   node_t *quadnode = new node_t[quadnodes];
   

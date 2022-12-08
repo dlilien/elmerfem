@@ -155,7 +155,7 @@ SUBROUTINE ResultOutputSolver( Model,Solver,dt,TransientSimulation )
   MinMeshDim = ListGetInteger( Params,'Minimum Mesh Dimension',Found )
   MaxMeshDim = ListGetInteger( Params,'Maximum Mesh Dimension',Found )
 
-  RefResults => ListGetConstRealArray( Params,'Reference Sums',CalcNrm )
+  RefResults => ListGetConstRealArray( Params,'Reference Values',CalcNrm )
   CALL AscBinInitNorm(CalcNrm) 
   
   ! Loop over the meshes and save them using the selected format(s).
@@ -314,7 +314,7 @@ SUBROUTINE ResultOutputSolver( Model,Solver,dt,TransientSimulation )
     IF( SaveVtu ) THEN
       Nrm = AscBinCompareNorm(RefResults(:,1))
       Solver % Variable % Norm = Nrm
-      WRITE( Message,'(A,ES12.3)' ) 'Calculate Pseudonorm:',Nrm
+      WRITE( Message,'(A,ES15.6)' ) 'Calculate Pseudonorm:',Nrm
       CALL Info(Caller, Message)
     ELSE
       CALL Warn(Caller,'Reference norm computation implemented only for VTU format!')

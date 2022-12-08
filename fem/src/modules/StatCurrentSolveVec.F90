@@ -55,12 +55,13 @@ SUBROUTINE StatCurrentSolver_init( Model,Solver,dt,Transient )
 !------------------------------------------------------------------------------
   CHARACTER(*), PARAMETER :: Caller = 'StatCurrentSolver_init'
   TYPE(ValueList_t), POINTER :: Params
-  LOGICAL :: Found, CalculateElemental, CalculateNodal
-  INTEGER :: dim
+  LOGICAL :: Found, CalculateElemental, CalculateNodal, PostActive 
+  INTEGER :: dim  
    
   Params => GetSolverParams()
   dim = CoordinateSystemDimension()
-
+  PostActive = .FALSE.
+  
   CALL ListAddNewString( Params,'Variable','Potential')
   
   CalculateElemental = ListGetLogical( Params,'Calculate Elemental Fields',Found )
@@ -77,6 +78,7 @@ SUBROUTINE StatCurrentSolver_init( Model,Solver,dt,Transient )
     IF( CalculateNodal ) &
         CALL ListAddString( Params,NextFreeKeyword('Exported Variable ',Params), &
         'Joule Heating' )
+    PostActive = .TRUE.
   END IF
   
   IF( ListGetLogical(Params,'Calculate Volume Current',Found) ) THEN
@@ -86,6 +88,7 @@ SUBROUTINE StatCurrentSolver_init( Model,Solver,dt,Transient )
     IF( CalculateNodal ) &
         CALL ListAddString( Params,NextFreeKeyword('Exported Variable ',Params), &
         'Volume Current[Volume Current:'//TRIM(I2S(dim))//']' )       
+    PostActive = .TRUE.
   END IF
   
   IF( ListGetLogical(Params,'Calculate Electric Field',Found) ) THEN
@@ -95,16 +98,19 @@ SUBROUTINE StatCurrentSolver_init( Model,Solver,dt,Transient )
     IF( CalculateNodal ) & 
         CALL ListAddString( Params,NextFreeKeyword('Exported Variable ',Params), &
         'Electric Field[Electric Field:'//TRIM(I2S(dim))//']' )
+    PostActive = .TRUE.
   END IF
 
   ! Nodal fields that may directly be associated as nodal loads
   IF (ListGetLogical(Params,'Calculate Nodal Heating',Found))  THEN
     CALL ListAddString( Params,NextFreeKeyword('Exported Variable',Params), &
         'Nodal Joule Heating' )
+    PostActive = .TRUE.
   END IF
   IF( ListGetLogical(Params,'Calculate Nodal Current',Found) ) THEN
     CALL ListAddString( Params,NextFreeKeyword('Exported Variable ',Params), &
         'Nodal Current[Nodal Current:'//TRIM(I2S(dim))//']' )
+    PostActive = .TRUE.
   END IF
 
   ! These use one flag to call library features to compute automatically
@@ -118,6 +124,9 @@ SUBROUTINE StatCurrentSolver_init( Model,Solver,dt,Transient )
         'ConductivityMatrix.dat',.FALSE.)
     CALL ListRenameAllBC( Model,'Conductivity Body','Constraint Mode Potential')
   END IF
+
+  ! If no fields need to be computed do not even call the _post solver!
+  CALL ListAddLogical(Params,'PostSolver Active',PostActive)
   
 END SUBROUTINE StatCurrentSolver_Init
 
@@ -175,6 +184,7 @@ SUBROUTINE StatCurrentSolver( Model,Solver,dt,Transient )
   
   IF( VecAsm .AND. AxiSymmetric ) THEN
     CALL Info(Caller,'Vectorized loop not yet available in axisymmetric case',Level=7)    
+    VecAsm = .FALSE.
   END IF
 
   IF( VecAsm ) THEN
@@ -243,7 +253,7 @@ SUBROUTINE StatCurrentSolver( Model,Solver,dt,Transient )
     !$OMP REDUCTION(+:totelem) DEFAULT(NONE)
     DO col=1,nColours
       !$OMP SINGLE
-      CALL Info('ModelPDEthreaded','Assembly of boundary colour: '//TRIM(I2S(col)),Level=10)
+      CALL Info(Caller,'Assembly of boundary colour: '//TRIM(I2S(col)),Level=10)
       Active = GetNOFBoundaryActive(Solver)
       !$OMP END SINGLE
 
@@ -304,8 +314,9 @@ CONTAINS
     TYPE(Nodes_t), SAVE :: Nodes
 
     TYPE(ValueHandle_t), SAVE :: SourceCoeff_h, CondCoeff_h, EpsCoeff_h
+    SAVE Eps0
     
-    !$OMP THREADPRIVATE(Basis, dBasisdx, DetJVec, &
+    !$OMP THREADPRIVATE(Basis, dBasisdx, Eps0, DetJVec, &
     !$OMP               MASS, STIFF, FORCE, Nodes, &
     !$OMP               SourceCoeff_h, CondCoeff_h, EpsCoeff_h, &
     !$OMP               SourceAtIpVec, CondAtIpVec, EpsAtIpVec )
@@ -377,7 +388,7 @@ CONTAINS
     IF( Found ) THEN
       CALL LinearForms_GradUdotGradU(ngp, nd, Element % TYPE % DIMENSION, dBasisdx, DetJVec, STIFF, CondAtIpVec )
     END IF
-
+    
     ! time derivative of potential: MASS=MASS+(eps*grad(u),grad(v))
     IF( Transient ) THEN
       EpsAtIpVec => ListGetElementRealVec( EpsCoeff_h, ngp, Basis, Element, Found ) 
@@ -420,9 +431,15 @@ CONTAINS
     INTEGER :: i,j,t,p,q,dim,m,allocstat,CondRank
     TYPE(GaussIntegrationPoints_t) :: IP
     TYPE(Nodes_t), SAVE :: Nodes
-    TYPE(ValueHandle_t), SAVE :: SourceCoeff_h, CondCoeff_h, EpsCoeff_h    
+    TYPE(ValueHandle_t), SAVE :: SourceCoeff_h, CondCoeff_h, EpsCoeff_h
+
+    SAVE Eps0
 !------------------------------------------------------------------------------
 
+    !$OMP THREADPRIVATE(Basis, dBasisdx, Eps0, &
+    !$OMP               MASS, STIFF, FORCE, Nodes, &
+    !$OMP               SourceCoeff_h, CondCoeff_h, EpsCoeff_h )
+    
     ! This InitHandles flag might be false on threaded 1st call
     IF( InitHandles ) THEN
       CALL ListInitElementKeyword( SourceCoeff_h,'Body Force','Current Source')
@@ -738,7 +755,17 @@ SUBROUTINE StatCurrentSolver_post( Model,Solver,dt,Transient )
   InitHandles = .TRUE.
   HeatingTot = 0.0_dp
   VolTot = 0.0_dp
-  DO t = 1, GetNOFActive()
+
+  !$OMP PARALLEL &
+  !$OMP SHARED(Solver, Active) &
+  !$OMP PRIVATE(t,Element, n, InitHandles, MASS, FORCE)
+  
+  !$OMP SINGLE
+  Active = GetNOFActive(Solver)
+  !$OMP END SINGLE
+
+  !$OMP DO
+  DO t = 1, Active
     Element => GetActiveElement(t)
     IF( ParEnv % PEs > 1 ) THEN
       IF( ParEnv % MyPe /= Element % PartIndex ) CYCLE
@@ -747,6 +774,8 @@ SUBROUTINE StatCurrentSolver_post( Model,Solver,dt,Transient )
     CALL LocalPostAssembly( Element, n, InitHandles, MASS, FORCE )
     CALL LocalPostSolve( Element, n, MASS, FORCE )
   END DO
+  !$OMP END DO 
+  !$OMP END PARALLEL
   
   IF( NeedScaling ) THEN
     CALL Info(Caller,'Scaling the field values with weights',Level=12)
@@ -802,6 +831,11 @@ CONTAINS
     TYPE(Nodes_t), SAVE :: Nodes
 
     TYPE(ValueHandle_t), SAVE :: SourceCoeff_h, CondCoeff_h, EpsCoeff_h
+    SAVE Eps0
+    
+    !$OMP THREADPRIVATE(Basis, dBasisdx, Eps0, ElementPot, &
+    !$OMP               Nodes,SourceCoeff_h, CondCoeff_h, EpsCoeff_h)
+
     
 !------------------------------------------------------------------------------
     ! This InitHandles flag might be false on threaded 1st call
@@ -934,10 +968,11 @@ CONTAINS
     INTEGER :: pivot(n),ind(n),i,j,m,dofs,dofcount,FieldType,Vari
     REAL(KIND=dp) :: x(n)
     TYPE(Variable_t), POINTER :: pVar
-    LOGICAL :: LocalSolved
+    LOGICAL :: LocalSolved, Erroneous
 !------------------------------------------------------------------------------
     
-    CALL LUdecomp(A,n,pivot)
+    CALL LUdecomp(A,n,pivot,Erroneous)
+    IF (Erroneous) CALL Fatal('LocalPostSolve', 'LU-decomposition fails')
 
     ! Weight is the 1st column
     dofcount = 1
@@ -967,7 +1002,7 @@ CONTAINS
           IF( PostVars(Vari) % NodalField ) THEN
             CONTINUE
           ELSE IF(.NOT. LocalSolved ) THEN
-            CALL LUSolve(n,MASS,x,pivot)
+            CALL LUSolve(n,A,x,pivot)
             LocalSolved = .TRUE.
           END IF
 

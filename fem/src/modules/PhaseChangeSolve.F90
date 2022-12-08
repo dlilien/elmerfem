@@ -31,7 +31,7 @@
 ! *           02101 Espoo, Finland 
 ! *
 ! *  Original Date: 08 Jun 1997
-! *  Modified by: Jussi Heikonen, Ville Savolainen, Peter Råback
+! *  Modified by: Jussi Heikonen, Ville Savolainen, Peter Raback
 ! *  Modification date: 2.9.2006
 ! *
 ! *****************************************************************************/
@@ -343,7 +343,7 @@ SUBROUTINE PhaseChangeSolve( Model,Solver,dt,TransientSimulation )
 
 !--------------------------------------------------------------------
 ! The transient algorithm 
-! In the transient algorhitm a heat flux over the interface is computed and 
+! In the transient algorithm a heat flux over the interface is computed and 
 ! it is assumed to be used solely in the melting of the solid into liquid. 
 ! This melting speed gives an estimate for the melting speed that may be 
 ! improved by iteration.
@@ -1009,7 +1009,7 @@ CONTAINS
         ! do nothing, loads already computed
 
       ELSE 
-        ! Compute the flux from normal derivaties
+        ! Compute the flux from normal derivatives
         TGrad = 0.0d0          
         l = 0
         DO i=1,2

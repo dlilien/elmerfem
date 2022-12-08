@@ -57,9 +57,9 @@ CONTAINS
 !-----------------------------------------------------------------------------
 !> Search CRS matrix for what?
 !-----------------------------------------------------------------------------
-  FUNCTION CRS_Search( N,Array,VALUE ) RESULT ( Index )
+  FUNCTION CRS_Search( N,Array,val ) RESULT ( Index )
 !-----------------------------------------------------------------------------
-    INTEGER :: N,VALUE,Array(:)
+    INTEGER :: N,val,Array(:)
 !-----------------------------------------------------------------------------
     INTEGER :: Lower, Upper,Lou,Index
 !-----------------------------------------------------------------------------
@@ -72,17 +72,17 @@ CONTAINS
     IF ( Upper == 0 ) RETURN
 
     DO WHILE( .TRUE. )
-      IF ( Array(Lower) == VALUE ) THEN
+      IF ( Array(Lower) == val ) THEN
         Index = Lower
         EXIT
-      ELSE IF ( Array(Upper) == VALUE ) THEN
+      ELSE IF ( Array(Upper) == val ) THEN
         Index = Upper
         EXIT
       END IF
 
       IF ( (Upper-Lower)>1 ) THEN
         Lou = ISHFT((Upper+Lower), -1)
-        IF ( Array(Lou) < VALUE ) THEN
+        IF ( Array(Lou) < val ) THEN
           Lower = Lou
         ELSE
           Upper = Lou
@@ -333,12 +333,12 @@ CONTAINS
 !------------------------------------------------------------------------------
 !>    Add a given value to an element of a  CRS format matrix.
 !------------------------------------------------------------------------------
-  SUBROUTINE CRS_AddToMatrixElement( A,i,j,VALUE )
+  SUBROUTINE CRS_AddToMatrixElement( A,i,j,val )
 !------------------------------------------------------------------------------
     TYPE(Matrix_t) :: A     !< Structure holding the matrix
     INTEGER, INTENT(IN) :: i         !< row number of the matrix element
     INTEGER, INTENT(IN) :: j         !< column number of the matrix element
-    REAL(KIND=dp), INTENT(IN) :: VALUE   !< value to be added to the matrix element
+    REAL(KIND=dp), INTENT(IN) :: val   !< value to be added to the matrix element
  !------------------------------------------------------------------------------
     INTEGER :: k
     REAL(KIND=dp), POINTER :: Values(:)
@@ -359,7 +359,7 @@ CONTAINS
 
     IF ( .NOT.ASSOCIATED(Diag) .OR. i /= j .OR. .NOT. A % Ordered ) THEN
       k = CRS_Search( Rows(i+1)-Rows(i),Cols(Rows(i):Rows(i+1)-1),j )
-      IF ( k==0 .AND. VALUE/=0 ) THEN
+      IF ( k==0 .AND. val/=0 ) THEN
         CALL Warn('CRS_AddToMatrixElement','Matrix element is to be added to a nonexistent position')
         CALL Warn('CRS_AddToMatrixElement','Row: '//i2s(i)//' Col: '//i2s(j))
         CALL Warn('CRS_AddToMatrixElement','Number of Matrix rows:'//i2s(A % NumberOfRows))
@@ -372,21 +372,159 @@ CONTAINS
       k = Diag(i)
     END IF
 !$omp atomic
-    Values(k) = Values(k) + VALUE
+    Values(k) = Values(k) + val
   END SUBROUTINE CRS_AddToMatrixElement
 !------------------------------------------------------------------------------
 
 
+!------------------------------------------------------------------------------
+!> Check existance of a matrix element.
+!------------------------------------------------------------------------------
+  FUNCTION CRS_CheckMatrixElement( A,i,j ) RESULT ( Found ) 
+!------------------------------------------------------------------------------
+    TYPE(Matrix_t) :: A                !< Structure holding the matrix
+    INTEGER, INTENT(IN) :: i           !< row number of the matrix element
+    INTEGER, INTENT(IN) :: j           !< column number of the matrix element
+    LOGICAL :: Found                   !< Does the matrix element exist!
+ !------------------------------------------------------------------------------
+    INTEGER, POINTER :: Cols(:),Rows(:)
+!------------------------------------------------------------------------------
+
+    Found = .FALSE.
+    IF(i > A % NumberOfRows) RETURN
+
+    Rows => A % Rows
+    Cols => A % Cols
+
+    Found = ANY( Cols(Rows(i):Rows(i+1)-1) == j )
+    
+  END FUNCTION CRS_CheckMatrixElement
+!------------------------------------------------------------------------------
+
+
+  
+!------------------------------------------------------------------------------
+!> Check whether matrix has a symmetric topology
+!------------------------------------------------------------------------------
+  SUBROUTINE CRS_CheckSymmetricTopo( A )
+!------------------------------------------------------------------------------
+    TYPE(Matrix_t) :: A     !< Structure holding the matrix
+!------------------------------------------------------------------------------
+    INTEGER :: i,j,k,k2,ns
+    INTEGER, POINTER :: Cols(:),Rows(:)
+    LOGICAL :: Hit
+!------------------------------------------------------------------------------
+    Rows   => A % Rows
+    Cols   => A % Cols
+
+    ns = 0
+    
+    DO i=1,A % NumberOfRows
+      DO k=Rows(i),Rows(i+1)-1
+        j=Cols(k)
+        Hit = .FALSE.
+        DO k2=Rows(j),Rows(j+1)-1
+          IF(Cols(k2)==i) THEN
+            Hit = .TRUE.
+            EXIT
+          END IF
+        END DO
+        IF(.NOT. Hit) THEN
+          ns = ns + 1
+          !PRINT *,'Not symmetric: ',i,j
+        END IF
+      END DO
+    END DO
+    
+    CALL Info('CSR_CheckSymmetricTopo','Number of symmetry misses:'//TRIM(I2S(ns)))
+    
+  END SUBROUTINE CRS_CheckSymmetricTopo
+!------------------------------------------------------------------------------
+
+
+!------------------------------------------------------------------------------
+!> Check whether matrix has a symmetric topology
+!------------------------------------------------------------------------------
+  SUBROUTINE CRS_CheckComplexTopo( A )
+!------------------------------------------------------------------------------
+    TYPE(Matrix_t) :: A     !< Structure holding the matrix
+!------------------------------------------------------------------------------
+    INTEGER :: i,j,k,i2,j2,k2,nc,nr
+    LOGICAL :: ImRow,ImCol
+    INTEGER, POINTER :: Cols(:),Rows(:)
+    LOGICAL :: Hit
+!------------------------------------------------------------------------------
+    Rows   => A % Rows
+    Cols   => A % Cols
+
+    nr = 0
+    nc = 0
+    
+    DO i=1,A % NumberOfRows
+      ImRow = (MODULO(i,2)==0)
+      IF(ImRow) THEN
+        i2=i-1
+      ELSE
+        i2=i+1
+      END IF
+
+      DO k=Rows(i),Rows(i+1)-1
+        j=Cols(k)
+        ImCol = (MODULO(j,2)==0) 
+        IF(ImCol) THEN
+          j2=j-1
+        ELSE
+          j2=j+1
+        END IF
+
+        ! We should find complementary entry on each row
+        Hit = .FALSE.
+        DO k2=Rows(i),Rows(i+1)-1
+          IF(Cols(k2)==j2) THEN
+            Hit = .TRUE.
+            EXIT
+          END IF
+        END DO
+        IF(.NOT. Hit) THEN
+          nr = nr + 1          
+          !PRINT *,'No complement on row: ',i,j,j2,ImRow,ImCol
+        END IF
+
+        ! We should find complementary entry on each column
+        Hit = .FALSE.        
+        DO k2=Rows(i2),Rows(i2+1)-1
+          IF(Cols(k2)==j) THEN
+            Hit = .TRUE.
+            EXIT
+          END IF
+        END DO
+        IF(.NOT. Hit) THEN
+          nc = nc + 1          
+          !PRINT *,'No complement on column: ',i,j,i2,ImRow,ImCol
+        END IF
+        
+      END DO
+    END DO
+    
+    CALL Info('CSR_CheckComplexTopo','Number of row misses:'//TRIM(I2S(nr)))
+    CALL Info('CSR_CheckComplexTopo','Number of col misses:'//TRIM(I2S(nc)))
+    
+  END SUBROUTINE CRS_CheckComplexTopo
+!------------------------------------------------------------------------------
+
+
+
+  
 
 !------------------------------------------------------------------------------
 !>    Set a given value to an element of a  CRS format matrix.
 !------------------------------------------------------------------------------
-  SUBROUTINE CRS_SetMatrixElement( A,i,j,VALUE )
+  SUBROUTINE CRS_SetMatrixElement( A,i,j,val )
 !------------------------------------------------------------------------------
     TYPE(Matrix_t) :: A     !< Structure holding the matrix
     INTEGER, INTENT(IN) :: i         !< row number of the matrix element
     INTEGER, INTENT(IN) :: j         !< column number of the matrix element
-    REAL(KIND=dp), INTENT(IN) :: VALUE   !< new value of the matrix element
+    REAL(KIND=dp), INTENT(IN) :: val   !< new value of the matrix element
 !------------------------------------------------------------------------------ 
     INTEGER :: k
     REAL(KIND=dp), POINTER :: Values(:)
@@ -412,7 +550,7 @@ CONTAINS
     ELSE
        k = Diag(i)
     END IF
-    Values(k) = VALUE
+    Values(k) = val
   END SUBROUTINE CRS_SetMatrixElement
 !------------------------------------------------------------------------------
 
@@ -420,12 +558,12 @@ CONTAINS
 !------------------------------------------------------------------------------
 !>    Get a given matrix entry from CRS format matrix.
 !------------------------------------------------------------------------------
-  FUNCTION CRS_GetMatrixElement( A,i,j ) RESULT ( VALUE )
+  FUNCTION CRS_GetMatrixElement( A,i,j ) RESULT ( val )
 !------------------------------------------------------------------------------
     TYPE(Matrix_t), INTENT(IN):: A     !< Structure holding the matrix
     INTEGER, INTENT(IN) :: i         !< row number of the matrix element
     INTEGER, INTENT(IN) :: j         !< column number of the matrix element
-    REAL(KIND=dp) :: VALUE   !< obtained value of the matrix element
+    REAL(KIND=dp) :: val   !< obtained value of the matrix element
 !------------------------------------------------------------------------------ 
     INTEGER :: k
     REAL(KIND=dp), POINTER :: Values(:)
@@ -436,7 +574,7 @@ CONTAINS
     Diag   => A % Diag
     Values => A % Values
 
-    Value = REAL(0,dp)
+    val = REAL(0,dp)
     IF ( .NOT.ASSOCIATED(Diag).OR.i /= j .OR. .NOT. A % Ordered ) THEN
        k = CRS_Search( Rows(i+1)-Rows(i),Cols(Rows(i):Rows(i+1)-1),j )
       IF ( k==0 ) THEN
@@ -447,7 +585,7 @@ CONTAINS
     ELSE
        k = Diag(i)
     END IF
-    VALUE = Values(k)
+    val = Values(k)
 
   END FUNCTION CRS_GetMatrixElement
 !------------------------------------------------------------------------------
@@ -455,13 +593,13 @@ CONTAINS
 !------------------------------------------------------------------------------
 !>    Get a given matrix entry from CRS format matrix and replace it with a new value
 !------------------------------------------------------------------------------
-  FUNCTION CRS_ChangeMatrixElement( A,i,j, NewValue ) RESULT ( OldValue )
+  FUNCTION CRS_ChangeMatrixElement( A,i,j, NewVal ) RESULT ( OldVal )
 !------------------------------------------------------------------------------
     TYPE(Matrix_t), INTENT(IN):: A     !< Structure holding the matrix
     INTEGER, INTENT(IN) :: i         !< row number of the matrix element
     INTEGER, INTENT(IN) :: j         !< column number of the matrix element
-    REAL(KIND=dp), INTENT(IN) :: NewValue  !< Value to be set   
-    REAL(KIND=dp) :: OldValue !< Value to be gotten  
+    REAL(KIND=dp), INTENT(IN) :: NewVal  !< Value to be set   
+    REAL(KIND=dp) :: OldVal !< Value to be gotten  
 !------------------------------------------------------------------------------
  
     INTEGER :: k
@@ -474,11 +612,11 @@ CONTAINS
     Diag   => A % Diag
     Values => A % Values
 
-    OldValue = REAL(0, dp)
+    OldVal = REAL(0, dp)
     IF ( .NOT.ASSOCIATED(Diag).OR.i /= j .OR. .NOT. A % Ordered ) THEN
        k = CRS_Search( Rows(i+1)-Rows(i),Cols(Rows(i):Rows(i+1)-1),j )
       IF ( k==0 ) THEN
-         PRINT*,'Trying to change value of a nonexistent matrix element: ', i,j,NewValue
+         PRINT*,'Trying to change value of a nonexistent matrix element: ', i,j,NewVal
          RETURN
        END IF
        k = k + Rows(i) - 1
@@ -486,8 +624,8 @@ CONTAINS
        k = Diag(i)
     END IF
 !$omp critical
-    OldValue = Values(k)
-    Values(k) = NewValue
+    OldVal = Values(k)
+    Values(k) = NewVal
 !$omp end critical
 
   END FUNCTION CRS_ChangeMatrixElement
@@ -920,7 +1058,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 !>    Add a set of values (.i.e. element stiffness matrix) to a CRS format
 !>    matrix. For this matrix the entries are ordered so that first for one
-!>    dof you got all nodes, and then for second etc. There may be on offset
+!>    dof you got all nodes, and then for second etc. There may be an offset
 !>    to the entries making the subroutine suitable for coupled monolithic
 !>    matrix assembly.
 !------------------------------------------------------------------------------
@@ -1257,7 +1395,8 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 
     NULLIFY( A % ILUValues )
     NULLIFY( A % CILUValues )
-    
+
+    A % ndeg = ndeg
     A % NumberOfRows = n
     A % Rows(1) = 1
     A % Ordered = .FALSE.
@@ -1343,47 +1482,119 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
      INTEGER, POINTER  CONTIG :: Cols(:),Rows(:)
      REAL(KIND=dp), POINTER  CONTIG :: Values(:)
 
-     INTEGER :: i,j,n
-     REAL(KIND=dp) :: rsum
+     INTEGER :: i,j,n,k,l,m
+     REAL(KIND=dp) :: r1,r2,r3,r4,r5
 #ifdef HAVE_MKL
-	INTERFACE
-		SUBROUTINE mkl_dcsrgemv(transa, m, a, ia, ja, x, y)
-	 		USE Types
-	 		CHARACTER :: transa
-	 		INTEGER :: m
-	 		REAL(KIND=dp) :: a(*)
-	 		INTEGER :: ia(*), ja(*)
-	 		REAL(KIND=dp) :: x(*), y(*)
-	 	END SUBROUTINE mkl_dcsrgemv
-	END INTERFACE
+     INTERFACE
+       SUBROUTINE mkl_dcsrgemv(transa, m, a, ia, ja, x, y)
+         USE Types
+         CHARACTER :: transa
+         INTEGER :: m
+         REAL(KIND=dp) :: a(*)
+         INTEGER :: ia(*), ja(*)
+         REAL(KIND=dp) :: x(*), y(*)
+       END SUBROUTINE mkl_dcsrgemv
+     END INTERFACE
 #endif
 
 !------------------------------------------------------------------------------
 
-     n = A % NumberOfRows
-     Rows   => A % Rows
-     Cols   => A % Cols
-     Values => A % Values
-
+    n = A % NumberOfRows
+    Rows   => A % Rows
+    Cols   => A % Cols
+    Values => A % Values
+    
     IF  ( A % MatvecSubr /= 0 ) THEN
       CALL MatVecSubrExt(A % MatVecSubr,A % SpMV, n,Rows,Cols,Values,u,v,0)
       RETURN
-   END IF
+    END IF
 
-	! Use MKL to perform mvp if it is available
+    ! Use MKL to perform mvp if it is available
 #ifdef HAVE_MKL
-	CALL mkl_dcsrgemv('N', n, Values, Rows, Cols, u, v)
+    CALL mkl_dcsrgemv('N', n, Values, Rows, Cols, u, v)
 #else
-!$omp parallel do private(j,rsum)
-     DO i=1,n
-        rsum = 0.0d0
-!DIR$ IVDEP
-        DO j=Rows(i),Rows(i+1)-1
-           rsum = rsum + u(Cols(j)) * Values(j)
+
+    ! There may be a small structured block in the CRS matrix that is due to the problem
+    ! being initially vector valued. For example, in 3D elasticity we usually have dofs related
+    ! to (x,y,z) displacements following each other. Using this small dense block we may reduce
+    ! indirect memory addressing a little.
+    !-------------------------------------------------------------------------------------------
+    SELECT CASE( A % ndeg )
+      
+    CASE( 5, 10 )
+      !$omp parallel do private(j,l,r1,r2,r3,r4,r5)
+      DO i=1,n
+        r1 = 0.0_dp; r2 = 0.0_dp; r3 = 0.0_dp; r4 = 0.0_dp; r5 = 0.0_dp
+        !DIR$ IVDEP
+        DO j=Rows(i),Rows(i+1)-1,5
+          l = Cols(j)
+          r1 = r1 + u(l) * Values(j)
+          r2 = r2 + u(l+1) * Values(j+1)
+          r3 = r3 + u(l+2) * Values(j+2)
+          r4 = r4 + u(l+3) * Values(j+3)
+          r5 = r5 + u(l+4) * Values(j+4)
         END DO
-        v(i) = rsum
-     END DO
-!$omp end parallel do
+        v(i) = r1 + r2 + r3 + r4 + r5
+      END DO
+      !$omp end parallel do
+
+    CASE( 4, 8 )
+      !$omp parallel do private(j,l,r1,r2,r3,r4)
+      DO i=1,n
+        r1 = 0.0_dp; r2 = 0.0_dp; r3 = 0.0_dp; r4 = 0.0_dp
+        !DIR$ IVDEP
+        DO j=Rows(i),Rows(i+1)-1,4
+          l = Cols(j)
+          r1 = r1 + u(l) * Values(j)
+          r2 = r2 + u(l+1) * Values(j+1)
+          r3 = r3 + u(l+2) * Values(j+2)
+          r4 = r4 + u(l+3) * Values(j+3)
+        END DO
+        v(i) = r1 + r2 + r3 + r4
+      END DO
+      !$omp end parallel do
+
+    CASE( 3, 6 )
+      !$omp parallel do private(j,l,r1,r2,r3)
+      DO i=1,n
+        r1 = 0.0_dp; r2 = 0.0_dp; r3 = 0.0_dp
+        !DIR$ IVDEP
+        DO j=Rows(i),Rows(i+1)-1,3
+          l = Cols(j)
+          r1 = r1 + u(l) * Values(j)
+          r2 = r2 + u(l+1) * Values(j+1)
+          r3 = r3 + u(l+2) * Values(j+2)
+        END DO
+        v(i) = r1 + r2 + r3
+      END DO
+      !$omp end parallel do
+      
+    CASE( 2 )
+      !$omp parallel do private(j,l,r1,r2)
+      DO i=1,n
+        r1 = 0.0_dp; r2 = 0.0_dp
+        !DIR$ IVDEP
+        DO j=Rows(i),Rows(i+1)-1,2
+          l = Cols(j)
+          r1 = r1 + u(l) * Values(j)
+          r2 = r2 + u(l+1) * Values(j+1)
+        END DO
+        v(i) = r1 + r2
+      END DO
+      !$omp end parallel do
+      
+    CASE DEFAULT      
+      !$omp parallel do private(j,r1)
+      DO i=1,n
+        r1 = 0.0_dp
+        !DIR$ IVDEP
+        DO j=Rows(i),Rows(i+1)-1
+          r1 = r1 + u(Cols(j)) * Values(j)
+        END DO
+        v(i) = r1 
+      END DO
+      !$omp end parallel do      
+    END SELECT
 #endif
 !------------------------------------------------------------------------------
   END SUBROUTINE CRS_MatrixVectorMultiply
@@ -2205,6 +2416,9 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     A % Values => Values
     A % Cols => Cols
 
+    ! This can no longer have structured blocks
+    A % Ndeg = -1
+    
     IF(.NOT. CheckDiag ) THEN
       IF( ASSOCIATED( A % Diag ) ) DEALLOCATE( A % Diag )
     END IF
@@ -2238,8 +2452,8 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     LOGICAL, ALLOCATABLE :: ActiveNodes(:), RowFound(:)
 
     TYPE(Matrix_t), POINTER :: im
-
-INCLUDE "mpif.h"
+    
+    INCLUDE "mpif.h"
 
     CALL Info('CRS_FCTLowOrder','Making low order FCT correction to matrix',Level=5)
 
@@ -2345,7 +2559,7 @@ INCLUDE "mpif.h"
 
     ! Create a lumped mass matrix by computing the rowsums of the 
     ! initial mass matrix.
-    CALL Info('CRS_FCTLowOder','Creating lumped mass matrix',Level=10)
+    CALL Info('CRS_FCTLowOrder','Creating lumped mass matrix',Level=10)
     IF(.NOT. ASSOCIATED(A % MassValuesLumped)) THEN         
       ALLOCATE(A % MassValuesLumped(n))
     END IF
@@ -2678,7 +2892,7 @@ INCLUDE "mpif.h"
 
 
 !------------------------------------------------------------------------------
-!>    Pics a block from matrix A to build matrix B. 
+!> Pics a block from matrix A to build matrix B. 
 !> This subroutine enables the use of 
 !> nontrivial block decompositions. 
 !------------------------------------------------------------------------------
@@ -2698,7 +2912,7 @@ INCLUDE "mpif.h"
     Blocks = SIZE( BlockStruct )
 
     IF(Blocks <= 1) THEN
-      CALL Fatal('CRS_BlockMatrixPick','No applicable to just one block!')
+      CALL Fatal('CRS_BlockMatrixPick2','Not applicable for just one block!')
       RETURN
     END IF
 
@@ -2722,7 +2936,7 @@ INCLUDE "mpif.h"
     END DO
 
     IF( Mrow == 0 .OR. Mcol == 0 ) THEN
-      CALL Fatal('CRS_BlockMatrixPick','Nothing to pick!')
+      CALL Fatal('CRS_BlockMatrixPick2','Nothing to pick!')
     END IF
 
     Nsub = N / Blocks
@@ -2780,18 +2994,18 @@ INCLUDE "mpif.h"
     
     IF( .NOT. Allocated ) THEN
       IF( kb == 1 ) THEN
-        CALL Warn('CRS_BlockMatrixPick','No matrix entries in submatrix')
+        CALL Warn('CRS_BlockMatrixPick2','No matrix entries in submatrix')
         RETURN
       END IF
 
       ALLOCATE(B % Rows(Mrow*nsub+1),B % Cols(kb-1), B % Values(kb-1),STAT=istat )
-      IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick','memory allocation error 1')
+      IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick2','memory allocation error 1')
       
       B % Rows(Mrow*Nsub+1) = kb
       
       IF( Diagonal ) THEN
         ALLOCATE( B % Diag(Mrow*nsub), B % rhs(Mrow*nsub), STAT=istat)
-        IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick','memory allocation error 2')      
+        IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick2','memory allocation error 2')      
       END IF
 
       IF( A % COMPLEX ) THEN
@@ -2800,6 +3014,12 @@ INCLUDE "mpif.h"
         END IF
       END IF
 
+      IF( A % Ndeg > 1 ) THEN
+        IF( Mrow == Mcol ) THEN
+          B % Ndeg = Mrow
+        END IF
+      END IF
+      
       Allocated = .TRUE.
       GOTO 100
     END IF
@@ -3063,8 +3283,8 @@ INCLUDE "mpif.h"
     TYPE(Matrix_t), POINTER :: A1
 !------------------------------------------------------------------------------
     WRITE(Message,'(a,i1,a)')  &
-         'ILU(',ILUn,') (Real), Starting Factorization:'
-    CALL Info( 'CRS_IncompleteLU', Message, Level = 5 )
+         'ILU(',ILUn,') (Real), Performing Factorization:'
+    CALL Info( 'CRS_IncompleteLU', Message, Level = 6 )
     st = CPUTime()
 
     N = A % NumberOfRows
@@ -3100,7 +3320,7 @@ INCLUDE "mpif.h"
              ALLOCATE( A1 )
 
              DO i=1,ILUn-1
-                CALL Info('CRS_IncompleLU','Recursive round: '//I2S(i))
+                CALL Info('CRS_IncompleLU','Recursive round: '//I2S(i),Level=7)
 
                 A1 % Cols => A % ILUCols
                 A1 % Rows => A % ILURows
@@ -3273,16 +3493,16 @@ INCLUDE "mpif.h"
 
     WRITE(Message,'(a,i1,a,i9)') 'ILU(', ILUn, &
         ') (Real), NOF nonzeros: ',ILURows(n+1)
-    CALL Info( 'CRS_IncompleteLU', Message, Level=5 )
+    CALL Info( 'CRS_IncompleteLU', Message, Level=6 )
 
     WRITE(Message,'(a,i1,a,i9)') 'ILU(', ILUn, &
         ') (Real), filling (%) : ',   &
          FLOOR(ILURows(n+1)*(100.0d0/Rows(n+1)))
-    CALL Info( 'CRS_IncompleteLU', Message, Level=5 )
+    CALL Info( 'CRS_IncompleteLU', Message, Level=6 )
 
     WRITE(Message,'(A,I1,A,F8.2)') 'ILU(',ILUn, &
         ') (Real), Factorization ready at (s): ', CPUTime()-st
-    CALL Info( 'CRS_IncompleteLU', Message, Level=5 )
+    CALL Info( 'CRS_IncompleteLU', Message, Level=6 )
 
     Status = .TRUE.
 !------------------------------------------------------------------------------
@@ -3408,7 +3628,7 @@ INCLUDE "mpif.h"
 !------------------------------------------------------------------------------
   FUNCTION CRS_ComplexIncompleteLU(A,ILUn) RESULT(Status)
 !------------------------------------------------------------------------------
-    TYPE(Matrix_t) :: A  !< Strcture holding input matrix, will also hold the factorization on exit.
+    TYPE(Matrix_t) :: A  !< Structure holding input matrix, will also hold the factorization on exit.
     INTEGER, INTENT(IN) :: ILUn   !< Order of fills allowed 0-9
     LOGICAL :: Status  !< Whether or not the factorization succeeded.
 !------------------------------------------------------------------------------
@@ -3423,8 +3643,8 @@ INCLUDE "mpif.h"
     COMPLEX(KIND=dp), ALLOCATABLE :: S(:), T(:)
 !------------------------------------------------------------------------------
 
-    WRITE(Message,'(a,i1,a)') 'ILU(',ILUn,') (Complex), Starting Factorization:'
-    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=5 )
+    WRITE(Message,'(a,i1,a)') 'ILU(',ILUn,') (Complex), Performing Factorization:'
+    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=6 )
     st = CPUTime()
 
     N = A % NumberOfRows
@@ -3620,16 +3840,16 @@ INCLUDE "mpif.h"
 
     WRITE(Message,'(a,i1,a,i9)') 'ILU(', ILUn, &
         ') (Complex), NOF nonzeros: ',ILURows(n/2+1)
-    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=5 )
+    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=6 )
 
     WRITE(Message,'(a,i1,a,i9)') 'ILU(', ILUn, &
         ') (Complex), filling (%) : ',   &
          FLOOR(ILURows(n/2+1)*(400.0d0/Rows(n+1)))
-    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=5 )
+    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=6 )
 
     WRITE(Message,'(A,I1,A,F8.2)') 'ILU(',ILUn, &
         ') (Complex), Factorization ready at (s): ', CPUTime()-st
-    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=5 )
+    CALL Info( 'CRS_ComplexIncompleteLU', Message, Level=6 )
 
     Status = .TRUE.
 !------------------------------------------------------------------------------
@@ -3753,7 +3973,7 @@ INCLUDE "mpif.h"
     REAL(KIND=dp) :: t
 !------------------------------------------------------------------------------
 
-    CALL Info( 'CRS_ILUT', 'Starting factorization:', Level=5 )
+    CALL Info( 'CRS_ILUT', 'Performing factorization:', Level=6 )
     t = CPUTime()
 
     n = A % NumberOfRows
@@ -3767,12 +3987,12 @@ INCLUDE "mpif.h"
     CALL ComputeILUT( A, n, TOL )
 ! 
     WRITE( Message, * ) 'ILU(T) (Real), NOF nonzeros: ',A % ILURows(N+1)
-    CALL Info( 'CRS_ILUT', Message, Level=5 )
+    CALL Info( 'CRS_ILUT', Message, Level=6 )
     WRITE( Message, * ) 'ILU(T) (Real), filling (%): ', &
          FLOOR(A % ILURows(N+1)*(100.0d0/A % Rows(N+1)))
-    CALL Info( 'CRS_ILUT', Message, Level=5 )
+    CALL Info( 'CRS_ILUT', Message, Level=6 )
     WRITE(Message,'(A,F8.2)') 'ILU(T) (Real), Factorization ready at (s): ', CPUTime()-t
-    CALL Info( 'CRS_ILUT', Message, Level=5 )
+    CALL Info( 'CRS_ILUT', Message, Level=6 )
 
     Status = .TRUE.
 !------------------------------------------------------------------------------
@@ -3969,12 +4189,12 @@ INCLUDE "mpif.h"
 !------------------------------------------------------------------------------
     
     WRITE( Message, * ) 'ILU(T) (Complex), NOF nonzeros: ',A % ILURows(n+1)
-    CALL Info( 'CRS_ComplexILUT', Message, Level=5 )
+    CALL Info( 'CRS_ComplexILUT', Message, Level=6 )
     WRITE( Message, * ) 'ILU(T) (Complex), filling (%): ', &
          FLOOR(A % ILURows(n+1)*(400.0d0/A % Rows(2*n+1)))
-    CALL Info( 'CRS_ComplexILUT', Message, Level=5 )
+    CALL Info( 'CRS_ComplexILUT', Message, Level=6 )
     WRITE(Message,'(A,F8.2)') 'ILU(T) (Complex), Factorization ready at (s): ', CPUTime()-t
-    CALL Info( 'CRS_ComplexILUT', Message, Level=5 )
+    CALL Info( 'CRS_ComplexILUT', Message, Level=6 )
 
     Status = .TRUE.
 !------------------------------------------------------------------------------
@@ -4211,18 +4431,12 @@ INCLUDE "mpif.h"
 !   -------------------------------------
     IF ( .NOT. ASSOCIATED( Values ) ) THEN
        DO i=1,A % NumberOfRows
-         b(i) = b(i) / A % Values( A % Diag(i) )
+         s = A % Values(A % Diag(i))
+         IF(s /= 0 ) b(i) = b(i) / s
        END DO
        RETURN
     END IF
 
-!--------------------------------------------------------------------
-! The following #ifdefs  seem really necessary, if speed is an issue:
-! SGI compiler optimizer  wants to know the sizes of the arrays very
-! explicitly, while DEC compiler seems to make a copy of some of the
-! arrays on the subroutine call (destroying performance).
-!--------------------------------------------------------------------
-#ifndef SGI
     IF ( A % Cholesky ) THEN
       !
       ! Forward substitute (solve z from Lz = b)
@@ -4267,35 +4481,6 @@ INCLUDE "mpif.h"
          b(i) = Values(Diag(i)) * s
       END DO
     END IF
-#else
-    CALL LUSolve( n,SIZE(Cols),Rows,Cols,Diag,Values,b )
-
-  CONTAINS
-
-    SUBROUTINE LUSolve( n,m,Rows,Cols,Diag,Values,b )
-      INTEGER :: n,m,Rows(n+1),Cols(m),Diag(n)
-      REAL(KIND=dp) :: Values(m),b(n)
-
-      INTEGER :: i,j
-
-      !
-      ! Forward substitute (solve z from Lz = b)
-      DO i=1,n
-         DO j=Rows(i),Diag(i)-1
-            b(i) = b(i) - Values(j) * b(Cols(j))
-         END DO
-      END DO
-
-      !
-      ! Backward substitute (solve x from UDx = z)
-      DO i=n,1,-1
-         DO j=Diag(i)+1,Rows(i+1)-1
-            b(i) = b(i) - Values(j) * b(Cols(j))
-         END DO
-         b(i) = Values(Diag(i)) * b(i)
-      END DO
-    END SUBROUTINE LUSolve
-#endif
 
   END SUBROUTINE CRS_LUSolve
 !------------------------------------------------------------------------------
@@ -4329,13 +4514,6 @@ INCLUDE "mpif.h"
 !   -------------------------------------
     IF ( .NOT. ASSOCIATED( Values ) ) RETURN
 
-!---------------------------------------------------------------------
-! The following #ifdefs  seem really necessary, if speed is an issue:
-! SGI compiler optimizer  wants to know the sizes of the arrays very
-! explicitly, while DEC compiler seems to make a copy of some of the
-! arrays on the subroutine call (destroying performance).
-!--------------------------------------------------------------------
-#ifndef SGI
     IF ( A % Cholesky ) THEN
       !
       ! Forward substitute
@@ -4376,39 +4554,9 @@ INCLUDE "mpif.h"
          b(i) = Values(Diag(i)) * s
       END DO
     END IF
-#else
-    CALL ComplexLUSolve( n,SIZE(Cols),Rows,Cols,Diag,Values,b )
-
-  CONTAINS
-
-    SUBROUTINE ComplexLUSolve( n,m,Rows,Cols,Diag,Values,b )
-      INTEGER :: n,m,Rows(n+1),Cols(m),Diag(n)
-      COMPLEX(KIND=dp) :: Values(m),b(n)
-
-      INTEGER :: i,j
-
-      !
-      ! Forward substitute
-      DO i=1,n
-         DO j=Rows(i),Diag(i)-1
-            b(i) = b(i) - Values(j) * b(Cols(j))
-         END DO
-      END DO
-
-      !
-      ! Backward substitute
-      DO i=n,1,-1
-         DO j=Diag(i)+1,Rows(i+1)-1
-            b(i) = b(i) - Values(j) * b(Cols(j))
-         END DO
-         b(i) = Values(Diag(i)) * b(i)
-      END DO
-    END SUBROUTINE ComplexLUSolve
-#endif
 
   END SUBROUTINE CRS_ComplexLUSolve
 !------------------------------------------------------------------------------
-
 
 
 !------------------------------------------------------------------------------
@@ -4417,74 +4565,141 @@ INCLUDE "mpif.h"
 !------------------------------------------------------------------------------
   SUBROUTINE CRS_MatrixVectorProd( u,v,ipar )
 !------------------------------------------------------------------------------
-    INTEGER, DIMENSION(*), INTENT(IN) :: ipar      !< Structure holding info HUTIter-iterative solver package
+    INTEGER, DIMENSION(*), INTENT(IN) :: ipar  !< Structure holding info HUTIter-iterative solver package
     REAL(KIND=dp), INTENT(IN) :: u(HUTI_NDIM)  !< vector to multiply u
-    REAL(KIND=dp) :: v(HUTI_NDIM)  !< result vector
+    REAL(KIND=dp) :: v(HUTI_NDIM)              !< result vector
 
 !------------------------------------------------------------------------------
     INTEGER, POINTER  CONTIG :: Cols(:),Rows(:)
-!   INTEGER, POINTER :: Cols(:),Rows(:)
     REAL(KIND=dp), POINTER  CONTIG :: Values(:)
-!   REAL(KIND=dp), POINTER :: Values(:)
 
 #ifdef HAVE_MKL
-	INTERFACE
-		SUBROUTINE mkl_dcsrgemv(transa, m, a, ia, ja, x, y)
-	 		USE Types
-	 		CHARACTER :: transa
-	 		INTEGER :: m
-	 		REAL(KIND=dp) :: a(*)
-	 		INTEGER :: ia(*), ja(*)
-	 		REAL(KIND=dp) :: x(*), y(*)
-	 	END SUBROUTINE mkl_dcsrgemv
-	END INTERFACE
+    INTERFACE
+      SUBROUTINE mkl_dcsrgemv(transa, m, a, ia, ja, x, y)
+        USE Types
+        CHARACTER :: transa
+        INTEGER :: m
+        REAL(KIND=dp) :: a(*)
+        INTEGER :: ia(*), ja(*)
+        REAL(KIND=dp) :: x(*), y(*)
+      END SUBROUTINE mkl_dcsrgemv
+    END INTERFACE
 #endif
 
-    INTEGER :: i,j,n
-    REAL(KIND=dp) :: s
+    INTEGER :: i,j,l,n,ndeg
+    REAL(KIND=dp) :: s,r1,r2,r3,r4,r5
+    
 !------------------------------------------------------------------------------
 
     n = GlobalMatrix % NumberOfRows
     Rows   => GlobalMatrix % Rows
     Cols   => GlobalMatrix % Cols
     Values => GlobalMatrix % Values
-
+    ndeg = GlobalMatrix % ndeg
+    
     IF  ( GlobalMatrix % MatVecSubr /= 0 ) THEN
       CALL MatVecSubrExt(GlobalMatrix % MatVecSubr, &
-                  GlobalMatrix % SpMV, n,Rows,Cols,Values,u,v,0)
+          GlobalMatrix % SpMV, n,Rows,Cols,Values,u,v,0)
       RETURN
-   END IF
-!--------------------------------------------------------------------
-! The following #ifdefs  seem really necessary, if speed is an issue:
-! SGI compiler optimizer  wants to know the sizes of the arrays very
-! explicitly, while DEC compiler seems to make a copy of some of the
-! arrays on the subroutine call (destroying performance).
-!--------------------------------------------------------------------
-#ifndef SGI
+    END IF
+
     IF ( HUTI_EXTOP_MATTYPE == HUTI_MAT_NOTTRPSED ) THEN
 #ifdef HAVE_MKL
-    CALL mkl_dcsrgemv('N', n, Values, Rows, Cols, u, v)
+      CALL mkl_dcsrgemv('N', n, Values, Rows, Cols, u, v)
 #else
-!$omp parallel do private(j,s)
-       DO i=1,n
-          s = 0.0d0
-!DIR$ IVDEP
-          DO j=Rows(i),Rows(i+1)-1
-             s = s + Values(j) * u(Cols(j))
+
+    ! There may be a small structured block in the CRS matrix that is due to the problem
+    ! being initially vector valued. For example, in 3D elasticity we usually have dofs related
+    ! to (x,y,z) displacements following each other. Using this small dense block we may reduce
+    ! indirect memory addressing a little.
+    !-------------------------------------------------------------------------------------------
+      SELECT CASE( ndeg )
+      
+      CASE( 5, 10 )
+        !$omp parallel do private(j,l,r1,r2,r3,r4,r5)
+        DO i=1,n
+          r1 = 0.0_dp; r2 = 0.0_dp; r3 = 0.0_dp; r4 = 0.0_dp; r5 = 0.0_dp
+          !DIR$ IVDEP
+          DO j=Rows(i),Rows(i+1)-1,5
+            l = Cols(j)
+            r1 = r1 + u(l) * Values(j)
+            r2 = r2 + u(l+1) * Values(j+1)
+            r3 = r3 + u(l+2) * Values(j+2)
+            r4 = r4 + u(l+3) * Values(j+3)
+            r5 = r5 + u(l+4) * Values(j+4)
           END DO
-          v(i) = s
-       END DO
-!$omp end parallel do
+          v(i) = r1 + r2 + r3 + r4 + r5
+        END DO
+        !$omp end parallel do
+        
+      CASE( 4, 8 )
+        !$omp parallel do private(j,l,r1,r2,r3,r4)
+        DO i=1,n
+          r1 = 0.0_dp; r2 = 0.0_dp; r3 = 0.0_dp; r4 = 0.0_dp
+          !DIR$ IVDEP
+          DO j=Rows(i),Rows(i+1)-1,4
+            l = Cols(j)
+            r1 = r1 + u(l) * Values(j)
+            r2 = r2 + u(l+1) * Values(j+1)
+            r3 = r3 + u(l+2) * Values(j+2)
+            r4 = r4 + u(l+3) * Values(j+3)
+          END DO
+          v(i) = r1 + r2 + r3 + r4
+        END DO
+        !$omp end parallel do
+        
+      CASE( 3, 6 )
+        !$omp parallel do shared(n,rows,cols,values) private(i,j,l,r1,r2,r3)
+        DO i=1,n
+          r1 = 0.0_dp; r2 = 0.0_dp; r3 = 0.0_dp
+          DO j=Rows(i),Rows(i+1)-1,3
+            l = Cols(j)
+            r1 = r1 + u(l) * Values(j)
+            r2 = r2 + u(l+1) * Values(j+1)
+            r3 = r3 + u(l+2) * Values(j+2)
+          END DO
+          v(i) = r1 + r2 + r3
+        END DO
+        !$omp end parallel do
+        
+      CASE( 2 )
+        !$omp parallel do private(j,l,r1,r2)
+        DO i=1,n
+          r1 = 0.0_dp; r2 = 0.0_dp
+          !DIR$ IVDEP
+          DO j=Rows(i),Rows(i+1)-1,2
+            l = Cols(j)
+            r1 = r1 + u(l) * Values(j)
+            r2 = r2 + u(l+1) * Values(j+1)
+          END DO
+          v(i) = r1 + r2
+        END DO
+        !$omp end parallel do
+        
+      CASE DEFAULT      
+        !$omp parallel do private(j,r1)
+        DO i=1,n
+          r1 = 0.0_dp
+          !DIR$ IVDEP
+          DO j=Rows(i),Rows(i+1)-1
+            r1 = r1 + u(Cols(j)) * Values(j)
+          END DO
+          v(i) = r1
+        END DO        
+        !$omp end parallel do      
+
+      END SELECT
 #endif
     ELSE
-       v(1:n) = 0.0d0
-       DO i=1,n
-          s = u(i)
-          DO j=Rows(i),Rows(i+1)-1
-             v(Cols(j)) = v(Cols(j)) + s * Values(j)
-          END DO
-       END DO
+      v(1:n) = 0.0d0
+      DO i=1,n
+        s = u(i)
+        DO j=Rows(i),Rows(i+1)-1
+          v(Cols(j)) = v(Cols(j)) + s * Values(j)
+        END DO
+      END DO
     END IF
+
 !    IF ( ASSOCIATED( GlobalMatrix % EMatrix ) ) THEN
 !       n = GlobalMatrix % EMatrix % NumberOFRows
 !       Rows   => GlobalMatrix % EMatrix % Rows
@@ -4508,40 +4723,9 @@ INCLUDE "mpif.h"
 !       END DO
 !       deallocate( w )
 !    END IF
-#else
-    CALL MatVec( n,SIZE(Cols),Rows,Cols,Values,u,v )
-
-  CONTAINS
-
-    SUBROUTINE MatVec( n,m,Rows,Cols,Values,u,v )
-      INTEGER :: n,m
-      INTEGER :: Rows(n+1),Cols(m)
-      REAL(KIND=dp) :: Values(m),u(n),v(n)
-
-      INTEGER :: i,j
-
-      IF ( HUTI_EXTOP_MATTYPE == HUTI_MAT_NOTTRPSED ) THEN
-         v(1:n) = 0.0d0
-         DO i=1,n
-            DO j=Rows(i),Rows(i+1)-1
-               v(i) = v(i) + Values(j) * u(Cols(j))
-            END DO
-         END DO
-      ELSE
-         v(1:n) = 0.0d0
-         DO i=1,n
-            s = u(i)
-            DO j=Rows(i),Rows(i+1)-1
-               v(Cols(j)) = v(Cols(j)) + s * Values(j)
-            END DO
-         END DO
-      END IF
-    END SUBROUTINE MatVec
-#endif
 
   END SUBROUTINE CRS_MatrixVectorProd
 !------------------------------------------------------------------------------
-
 
 
 !------------------------------------------------------------------------------
@@ -4568,13 +4752,6 @@ INCLUDE "mpif.h"
     Cols   => GlobalMatrix % Cols
     Values => GlobalMatrix % Values
 
-!----------------------------------------------------------------------
-! The following #ifdefs  seem really necessary, if speed is an issue:
-! SGI compiler optimizer  wants to know the sizes of the arrays very
-! explicitly, while DEC compiler seems to make a copy of some of the
-! arrays on the subroutine call (destroying performance).
-!----------------------------------------------------------------------
-#ifndef SGI
     IF ( HUTI_EXTOP_MATTYPE == HUTI_MAT_NOTTRPSED ) THEN
 !$omp parallel do private(rsum,j,s)
        DO i=1,n
@@ -4597,41 +4774,6 @@ INCLUDE "mpif.h"
           END DO
        END DO
     END IF
-#else
-    CALL ComplexMatVec( n,SIZE(Cols),Rows,Cols,Values,u,v )
-
-  CONTAINS
-
-    SUBROUTINE ComplexMatVec( n,m,Rows,Cols,Values,u,v )
-      INTEGER :: n,m
-      INTEGER :: Rows(2*n+1),Cols(m)
-      REAL(KIND=dp) :: Values(m)
-      COMPLEX(KIND=dp) :: u(n),v(n)
-
-      INTEGER :: i,j
-      COMPLEX(KIND=dp) :: s, rsum
-
-      IF ( HUTI_EXTOP_MATTYPE == HUTI_MAT_NOTTRPSED ) THEN
-         DO i=1,n
-            rsum = CMPLX( 0.0d0, 0.0d0, KIND=dp )
-            DO j=Rows(2*i-1),Rows(2*i)-1,2
-               s = CMPLX( Values(j), -Values(j+1), KIND=dp )
-               rsum = rsum + s * u((Cols(j)+1)/2)
-            END DO
-            v(i) = rsum
-         END DO
-      ELSE
-         v = CMPLX( 0.0d0, 0.0d0, KIND=dp )
-         DO i=1,n
-            rsum = u(i)
-            DO j=Rows(2*i-1),Rows(2*i)-1,2
-               s = CMPLX( Values(j), -Values(j+1), KIND=dp )
-               v((Cols(j)+1)/2) = v((Cols(j)+1)/2) + s * rsum
-            END DO
-         END DO
-      END IF
-    END SUBROUTINE ComplexMatVec
-#endif
 
   END SUBROUTINE CRS_ComplexMatrixVectorProd
 !------------------------------------------------------------------------------
@@ -4852,6 +4994,139 @@ INCLUDE "mpif.h"
   END SUBROUTINE CRS_PackMatrix
 !------------------------------------------------------------------------------
 
+
+!------------------------------------------------------------------------------
+!> At first call register the matrix topology.
+!> At second round change the matrix topology of the vectors.
+!> Without change in topology all matrix operations with BulkValues,
+!> MassValues, and DampValues would break down. 
+!------------------------------------------------------------------------------
+  SUBROUTINE CRS_ChangeTopology( A, Init )
+!------------------------------------------------------------------------------
+    TYPE(Matrix_t) :: A     !< Structure holding the matrix
+    LOGICAL :: Init
+!------------------------------------------------------------------------------ 
+    LOGICAL, SAVE :: InitDone = .FALSE.
+    INTEGER, ALLOCATABLE, SAVE :: Rows0(:), Cols0(:)
+    REAL(KIND=dp), POINTER :: Aold(:), Anew(:)
+    INTEGER, SAVE :: n0
+    INTEGER :: i,j,k,j2,k2,ivec,n
+    
+
+    IF( A % NumberOfRows == 0 ) RETURN
+        
+    IF(Init) THEN
+      IF(InitDone) THEN
+        CALL Warn('CRS_ChangeTopology','We already have initialized Cols0 and Rows0!')
+        DEALLOCATE(Cols0,Rows0)
+      END IF
+      n0 = SIZE(A % Cols)
+      CALL Info('CRS_ChangeTopology','Original matrix non-zeros: '//TRIM(I2S(n0)),Level=12)
+      
+      ALLOCATE( Cols0(n0), Rows0( SIZE( A % Rows ) ) )
+      Cols0 = A % Cols
+      Rows0 = A % Rows
+      InitDone = .TRUE.
+    ELSE
+      n = SIZE( A % Cols )
+      
+      IF( n == n0 ) THEN
+        IF( ALL( Cols0 == A % Cols ) ) THEN
+          CALL Info('CRS_ChangeTopology','Topology is unaltered!',Level=20)
+          DEALLOCATE(Cols0,Rows0)
+          InitDone = .FALSE.
+          RETURN
+        END IF
+      END IF
+
+      IF( SIZE(A % Rows) /= SIZE(Rows0) ) THEN
+        CALL Fatal('CRS_ChangeTopology','This routine assumes constant number of rows!')
+      END IF
+      
+      CALL Info('CRS_ChangeTopology','New matrix non-zeros: '//TRIM(I2S(n)),Level=12)
+      
+      DO ivec=1,3
+        NULLIFY(Aold)
+        SELECT CASE(ivec)
+        CASE( 1 )
+          Aold => A % BulkValues
+        CASE( 2 )
+          Aold => A % MassValues
+        CASE( 3 )
+          Aold => A % DampValues
+        END SELECT
+        
+        IF( .NOT. ASSOCIATED(Aold) ) CYCLE
+        
+        NULLIFY(Anew)
+        ALLOCATE(Anew(n))
+        Anew = 0.0_dp
+        
+        DO i=1,A % NumberOfRows
+          DO j = Rows0(i), Rows0(i+1)-1
+            k = Cols0(j) 
+            DO j2 = A % Rows(i), A % Rows(i+1)-1
+              k2 = A % Cols(j2)
+              IF( k == k2 ) THEN
+                Anew(j2) = Aold(j)
+                EXIT
+              END IF
+            END DO
+          END DO
+        END DO
+        
+        DEALLOCATE( Aold ) 
+
+        SELECT CASE(ivec)
+        CASE( 1 )
+          A % BulkValues => Anew
+        CASE( 2 )
+          A % MassValues => Anew
+        CASE( 3 )
+          A % DampValues => Anew 
+        END SELECT
+        
+      END DO
+            
+      DEALLOCATE(Cols0,Rows0)
+      InitDone = .FALSE.
+      
+      A % ndeg = -1 
+      CALL Info('CRS_ChangeTopology','Matrix topology changed',Level=30)
+    END IF
+          
+  END SUBROUTINE CRS_ChangeTopology
+
+!------------------------------------------------------------------------------
+!> Check that matrix has a repeating block of size "dofs" that can be
+!> utilized in Matrix-Vector products, for example. 
+!------------------------------------------------------------------------------
+  FUNCTION CRS_CheckStructuredDofs( A, dofs) RESULT ( Failed )
+!------------------------------------------------------------------------------
+    TYPE(Matrix_t), INTENT(IN) :: A                !< Structure holding matrix
+    INTEGER :: dofs                                !< Size of dense block to be tested
+    LOGICAL :: Failed
+!------------------------------------------------------------------------------
+    INTEGER, POINTER  CONTIG :: Cols(:),Rows(:)
+    INTEGER :: i,j,k,n,m
+!------------------------------------------------------------------------------
+    n = A % NumberOfRows
+    Rows   => A % Rows
+    Cols   => A % Cols
+
+    Failed = .FALSE.
+    DO i=1,n
+      DO j=Rows(i),Rows(i+1)-1,dofs
+        DO k=1,dofs-1
+          IF( Cols(j+k)-Cols(j) /= k ) THEN
+            Failed = .TRUE.
+            EXIT
+          END IF
+        END DO
+      END DO
+    END DO
+      
+  END FUNCTION CRS_CheckStructuredDofs
 
 
 END MODULE CRSMatrix

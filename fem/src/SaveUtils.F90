@@ -45,6 +45,8 @@ MODULE SaveUtils
   USE SParIterGlobals
   USE Lists
   USE Messages
+  USE MeshUtils, ONLY: GetLagrangeIndexes
+  
   IMPLICIT NONE
 
 CONTAINS
@@ -56,7 +58,7 @@ CONTAINS
     INTEGER :: ElmerCode
     LOGICAL :: SaveLinear
     INTEGER :: VTKCode
-
+    
     SELECT CASE (ElmerCode)
     CASE( 101 )
       VTKCode = 1
@@ -64,20 +66,30 @@ CONTAINS
       VTKCode = 3
     CASE( 203 )
       VTKCode = 21
+    CASE( 204 )
+      VTKCode = 35  ! VTK_CUBIC_LINE but 68, VTK_LAGRANGE_CURVE, tested to work as well 
+    CASE( 205, 206, 207, 208, 209 )
+      VTKCode = 68
     CASE( 303 )
       VTKCode = 5
     CASE( 306 )
       VTKCode = 22
+    CASE( 310, 315, 321, 328, 336, 345 )
+      VTKCode = 69  ! VTK_LAGRANGE_TRIANGLE
     CASE( 404 )
       VTKCode = 9
     CASE( 408 )
       VTKCode = 23
     CASE( 409 )
       VTKCode = 28
+    CASE( 416, 425, 436, 449, 464, 481 )
+      VTKCode = 70  ! VTK_LAGRANGE_QUADRILATERAL
     CASE( 504 )
       VTKCode = 10
     CASE( 510 )
       VTKCode = 24
+    CASE( 520, 535 )
+      VTKCode = 71  ! VTK_LAGRANGE_TETRAHEDRON
     CASE( 605 )
       VTKCode = 14
     CASE( 613 )
@@ -86,27 +98,32 @@ CONTAINS
       VTKCode = 13
     CASE( 715 ) 
       VTKCode = 26
+    CASE( 718, 740, 775 ) 
+      VTKCode = 73  ! VTK_LAGRANGE_WEDGE
     CASE( 808 )
       VTKCode = 12
     CASE( 820 )
       VTKCode = 25
     CASE( 827 )
       VTKCode = 29
+    CASE( 864, 8125, 8216, 8343, 8512, 8729)
+      VTKCode = 72  ! VTK_LAGRANGE_HEXAHEDRON
     CASE DEFAULT
       WRITE(Message,'(A,I0)') 'Not implemented for elementtype: ',ElmerCode
       CALL Fatal('Elmer2VtkElement',Message)
 
     END SELECT
 
+    !PRINT *,'Code:',ElmerCode, VtkCode   
 
-    ! If requested return the 1st order element corresponding to the higher order elements
+    ! If requested, return the 1st order element corresponding to the higher order elements
     IF( SaveLinear ) THEN
       SELECT CASE (VTKCode)
-      CASE( 21 )
+      CASE( 21, 35 )
         VTKCode = 3
-      CASE( 22 )
+      CASE( 22, 69 )
         VTKCode = 5
-      CASE( 23, 28 )
+      CASE( 23, 28, 70 )
         VTKCode = 9
       CASE( 24 )
         VTKCode = 10
@@ -135,6 +152,8 @@ CONTAINS
     INTEGER, TARGET :: BCIndexes(27)
     INTEGER :: ElmerCode, i,j,k,n,hits
     INTEGER, POINTER :: Order(:)
+    INTEGER, TARGET, DIMENSION(16) :: &
+        Order416 = (/1,2,3,4,5,6,7,8,10,9,12,11,13,14,16,15/)
     INTEGER, TARGET, DIMENSION(20) :: &
         Order820 = (/1,2,3,4,5,6,7,8,9,10,11,12,17,18,19,20,13,14,15,16/)
     INTEGER, TARGET, DIMENSION(27) :: &
@@ -155,7 +174,18 @@ CONTAINS
           Parent => Element % BoundaryInfo % Right        
         END IF
         IF ( ASSOCIATED(Parent) ) THEN
-          IF (ASSOCIATED(Parent % DGIndexes) ) THEN
+          IF (.NOT. ASSOCIATED(Parent % DGIndexes) ) THEN
+            ! This could happen if we have parents of parents i.e. the original element
+            ! is a line element, has parents that are face elements, having parents being volume elements. 
+            IF( ASSOCIATED( Parent % BoundaryInfo ) ) THEN
+              IF( ASSOCIATED( Parent % BoundaryInfo % Left ) ) THEN
+                Parent => Parent % BoundaryInfo % Left
+              ELSE IF( ASSOCIATED( Parent % BoundaryInfo % Right ) ) THEN
+                Parent => Parent % BoundaryInfo % Right
+              END IF
+            END IF
+          END IF
+          IF( ASSOCIATED( Parent % DGIndexes ) ) THEN
             n = Element % TYPE % NumberOfNodes 
             hits = 0
             DO j=1,n
@@ -176,10 +206,8 @@ CONTAINS
       ENDIF
 
       IF(.NOT. ASSOCIATED( UseIndexes ) ) THEN
-        PRINT *,'Problematic BC elem:',Element % BodyId, Element % ElementIndex, Element % NodeIndexes, &
-            ASSOCIATED( Element % DgIndexes ), ASSOCIATED( Element % BoundaryInfo ), DGelem, &
-            Element % TYPE % ElementCode
-        CALL Fatal('Elmer2VtkIndexes','Could not set indexes for boundary element!')        
+        CALL Warn('Elmer2VtkIndexes','Could not set DG indexes for boundary element!')        
+        UseIndexes => Element % NodeIndexes
       END IF
     ELSE
       UseIndexes => Element % NodeIndexes
@@ -191,6 +219,10 @@ CONTAINS
     ! Linear elements never require reordering 
     IF( .NOT. SaveLinear ) THEN
       SELECT CASE (ElmerCode)
+
+      CASE( 416 )
+        Order => Order416
+        DoReOrder = .TRUE.
 
       CASE( 820 )
         Order => Order820
@@ -226,7 +258,7 @@ CONTAINS
     INTEGER :: i,n
     LOGICAL :: reorder, Visited = .FALSE.
 
-    INTEGER, TARGET :: order510(10),order613(13),order715(15),order820(20)
+    INTEGER, TARGET, SAVE :: order510(10),order613(13),order715(15),order820(20)
     INTEGER, POINTER :: order(:)
 
     SAVE Visited
@@ -235,7 +267,7 @@ CONTAINS
       order510(:) = (/ 0,1,2,3,4,5,6,7,9,8 /)
       order613(:) = (/ 0,1,2,3,4,5,8,10,6,7,9,11,12 /)
       order715(:) = (/ 0,1,2,3,4,5,6,9,7,8,10,11,12,14,13 /)
-      order820(:) = (/ 0,1,2,3,4,5,6,7,8,11,12,9,10,12,14,15,16,18,19,17 /)
+      order820(:) = (/ 0,1,2,3,4,5,6,7,8,11,13,9,10,12,14,15,16,18,19,17 /)
       Visited = .TRUE.
     END IF
 
@@ -277,7 +309,7 @@ CONTAINS
 
   
   
-  ! Given different criteria fos saving create a geometrical mask for elements
+  ! Given different criteria for saving create a geometrical mask for elements
   ! and continuous numbering for the associated nodes.
   !------------------------------------------------------------------------------  
   SUBROUTINE GenerateSaveMask(Mesh,Params,Parallel,GroupId,SaveLinear,&
@@ -304,7 +336,7 @@ CONTAINS
     TYPE(Element_t), POINTER :: Element, LeftElem, RightElem
     TYPE(Model_t), POINTER :: Model
     CHARACTER(*), PARAMETER :: Caller = 'GenerateSaveMask'
-
+    
     Model => CurrentModel
 
     GroupCollection = ( GroupId > 0 ) 
@@ -343,6 +375,7 @@ CONTAINS
       END IF
     ELSE
       ! Check if there is an additional mask name given
+      GotIt = .FALSE.
       IF( Mesh % MeshDim == 2 ) THEN
         MaskName = ListGetString( Params,'2D Mask Name',GotIt)    
       ELSE IF( Mesh % MeshDim == 3 ) THEN  
@@ -479,6 +512,7 @@ CONTAINS
       IF( GotMaskCond ) THEN
         n = Element % TYPE % NumberOfNodes
         Indexes => Element % NodeIndexes
+        GotIt = .FALSE.
         
         IF( .NOT. IsBoundaryElement ) THEN
           l = Element % BodyId
@@ -496,7 +530,6 @@ CONTAINS
             END IF
           END IF
         ELSE
-          GotIt = .FALSE.
           IF( ASSOCIATED( Element % BoundaryInfo ) ) THEN
             DO l=1, Model % NumberOfBCs
               IF ( Model % BCs(l) % Tag /= Element % BoundaryInfo % Constraint ) CYCLE
@@ -522,30 +555,36 @@ CONTAINS
         m = Element % TYPE % ElementCode / 100
         IF( m >= 5 .AND. m <= 7 ) m = m-1
         NodePerm( Element % NodeIndexes(1:m) ) = 1
-      ELSE          
+      ELSE
+        IF( MAXVAL( Element % NodeIndexes ) > SIZE( NodePerm ) ) THEN
+          PRINT *,'too big:',SIZE(NodePerm), Element % NodeIndexes
+        END IF
         NodePerm( Element % NodeIndexes ) = 1
       END IF
 
     END DO
 
-    CALL Info(Caller,'Number of active elements '//TRIM(I2S(NumberOfElements))//&
-        ' out of '//TRIM(I2S(Mesh % NumberOfBulkElements + Mesh % NumberOfBoundaryElements)),Level=7)
-    
     NumberOfGeomNodes = COUNT( NodePerm > 0 ) 
-    
-    CALL Info(Caller,'Number of geometry nodes '//TRIM(I2S(NumberOfGeomNodes))//&
-        ' out of '//TRIM(I2S(Mesh % NumberOfNodes)),Level=7)
-
+    IF( NumberOfElements == 0 ) THEN
+      CALL Info(Caller,'No active elements forthis mask',Level=12)
+    ELSE
+      CALL Info(Caller,'Number of active elements '//TRIM(I2S(NumberOfElements))//&
+          ' out of '//TRIM(I2S(Mesh % NumberOfBulkElements + Mesh % NumberOfBoundaryElements)),Level=10)      
+      CALL Info(Caller,'Number of geometry nodes '//TRIM(I2S(NumberOfGeomNodes))//&
+          ' out of '//TRIM(I2S(Mesh % NumberOfNodes)),Level=10)
+    END IF
+      
   END SUBROUTINE GenerateSaveMask
     
-
+  
   ! Given the geometric permutation, create the dof permutation used in saving
   ! the different parts.
   !-----------------------------------------------------------------------------  
-  SUBROUTINE GenerateSavePermutation(Mesh,DG,DN,SaveLinear,ActiveElem,NumberOfGeomNodes,&
+  SUBROUTINE GenerateSavePermutation(Mesh,DG,DN,LagN,SaveLinear,ActiveElem,NumberOfGeomNodes,&
       NoPermutation,NumberOfDofNodes,DgPerm,InvDgPerm,NodePerm,InvNodePerm)
     TYPE(Mesh_t), POINTER :: Mesh
     LOGICAL :: DG, DN, SaveLinear
+    INTEGER :: LagN
     LOGICAL, ALLOCATABLE :: ActiveElem(:)
     INTEGER :: NumberOfGeomNodes,NumberOfDofNodes
     LOGICAL :: NoPermutation
@@ -554,18 +593,23 @@ CONTAINS
     INTEGER, ALLOCATABLE :: BodyVisited(:)
     INTEGER :: i,j,k,l,m,n
     INTEGER :: Sweep
-    INTEGER, POINTER :: NodeIndexes(:) 
+    INTEGER, POINTER :: NodeIndexes(:)
+    INTEGER, ALLOCATABLE :: pIndexes(:)
     TYPE(Element_t), POINTER :: Element 
     TYPE(Model_t), POINTER :: Model
     CHARACTER(*), PARAMETER :: Caller = 'GenerateSavePermutation'
 
     
     Model => CurrentModel
-        
+            
     NumberOfDofNodes = 0
     IF( DG .OR. DN ) THEN
       NoPermutation = .FALSE.
 
+      IF( LagN > 0 ) THEN
+        CALL Fatal(Caller,'Cannot combine DG and higher order Lagrange elements!')
+      END IF
+      
       IF( DN ) THEN      
         CALL Info(Caller,'Saving results as discontinuous over bodies',Level=15)
         ALLOCATE( BodyVisited( Mesh % NumberOfNodes ) )
@@ -656,6 +700,40 @@ CONTAINS
 
       IF( DN ) DEALLOCATE( BodyVisited ) 
 
+    ELSE IF( LagN > 0 ) THEN
+      CALL Info(Caller,'Creating permutation for order '//TRIM(I2S(LagN))//' Lagrange nodes!', Level=12)
+
+      ! Calling without Element as argument returns the max. index value
+      n = GetLagrangeIndexes( Mesh, LagN )
+      ALLOCATE(DgPerm(n), pIndexes(n))
+      DgPerm = 0        
+      pIndexes = 0 
+      
+      ! Now call and then number the indexes!
+      ! We use the same elemental subroutine to get the indexes as is done in the interpolation
+      ! to avoid problems related to code inconsistency. There could be faster global ways too...
+      DO i=1,Mesh % NumberOfBulkElements
+        Element => Mesh % Elements(i)
+        m = GetLagrangeIndexes( Mesh, LagN, Element, pIndexes )
+        DgPerm(pIndexes(1:m)) = 1
+      END DO
+
+      m = 0
+      DO i=1,n
+        IF(DgPerm(i) > 0) THEN
+          m = m+1
+          DgPerm(i) = m
+        END IF
+      END DO
+
+      ! Both the number of nodes and number of dofs will now follow the new higher order L-elements
+      ! We will use no permutation for dofs or coordinates since we create a permutation-free temporal
+      ! solution vectors and coordinates. 
+      NumberOfDofNodes = m
+      NumberOfGeomNodes = m
+      NoPermutation = .TRUE.
+      
+      CALL Info(Caller,'Number of dofs for higher order Lagrange elements: '//TRIM(I2S(m)),Level=12)
     ELSE
       NoPermutation = ( NumberOfGeomNodes == Mesh % NumberOfNodes )    
       IF( NoPermutation ) THEN
@@ -680,7 +758,10 @@ CONTAINS
       END IF
       NumberOfDofNodes = NumberOfGeomNodes 
     END IF
+    
   END SUBROUTINE GenerateSavePermutation
 
+
+  
 END MODULE SaveUtils
   

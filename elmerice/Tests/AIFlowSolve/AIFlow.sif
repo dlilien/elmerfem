@@ -27,7 +27,7 @@ Simulation
   Timestep Intervals =  10
   Output Intervals = 10 
   Output File = "AIFlow.result"
-  Post File = "AIFlow.vtu" ! use .ep suffix for leagcy format
+  Post File = "AIFlow.vtu" ! use .ep suffix for legacy format
   Initialize Dirichlet Conditions = Logical False
 End
 
@@ -239,7 +239,3 @@ End
 
 Solver 2 :: Reference Norm = Real 1.06324421E+01
 Solver 2 :: Reference Norm Tolerance = Real 1E-06
-$fprintf( stderr, "TEST CASE 1\n");
-RUN
-$fprintf( stderr, "END TEST CASE 1: Target NRM=1.06324421E+01,EPS=1E-06\n" );
-

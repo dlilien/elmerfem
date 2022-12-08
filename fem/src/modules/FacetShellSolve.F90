@@ -41,7 +41,7 @@
 !> Initialization for the primary solver: ShellSolver
 !> \ingroup Solvers
 !------------------------------------------------------------------------------
-  SUBROUTINE ShellSolver_Init( Model,Solver,dt,Transient )
+  SUBROUTINE ShellSolver_Init0( Model,Solver,dt,Transient )
 !------------------------------------------------------------------------------
     USE DefUtils
 
@@ -58,8 +58,11 @@
       CALL ListAddString( SolverParams, 'Variable', 'Deflection' )
     END IF
     CALL ListAddInteger( SolverParams, 'Time derivative order', 2 )
+
+    CALL ListAddLogical( SolverParams, 'Shell Solver', .TRUE. )
+    CALL ListAddLogical( SolverParams, 'Drilling DOFs', .TRUE. )
 !------------------------------------------------------------------------------
-  END SUBROUTINE ShellSolver_Init
+  END SUBROUTINE ShellSolver_Init0
 !------------------------------------------------------------------------------
 
  
@@ -106,7 +109,7 @@
      REAL(KIND=dp), ALLOCATABLE :: STIFF(:,:), &
           LoadX(:), LoadY(:), LoadZ(:), LoadN(:), FORCE(:), &
           Poisson(:), Thickness(:), Young(:), Tension(:), &
-          MASS(:,:), DAMP(:,:), Density(:), &
+          MASS(:,:), DAMP(:,:), DampingCoef(:), Density(:), &
           LocalDeflection(:), SxxElement(:), SyyElement(:), SzzElement(:), &
           SxyElement(:), SxzElement(:), SyzElement(:), LoadVector(:,:), &
           Weights(:,:), Referenced(:), &
@@ -125,8 +128,6 @@
 
      LOGICAL :: GotIt, GotForceBC
 
-     LOGICAL :: Isotropic = .FALSE.
-
      TYPE(ValueList_t), POINTER :: SolverParams, Material, BodyForce, BC
 
      REAL(KIND=dp) :: xn, yn, zn, xp, yp, zp, r
@@ -137,7 +138,7 @@
 
      SAVE STIFF, MASS, LoadX, LoadY, LoadZ, LoadN, &
           FORCE, ElementNodes, Poisson, Density, Young, Thickness, &
-          Tension, AllocationsDone, DAMP, LocalDeflection, &
+          Tension, AllocationsDone, DAMP, DampingCoef, LocalDeflection, &
           SxxNodal, SyyNodal, SzzNodal, SxyNodal, SxzNodal, SyzNodal, &
           EpsxxNodal, EpsyyNodal, EpszzNodal, EpsxyNodal, EpsxzNodal, &
           EpsyzNodal, LoadVector
@@ -185,7 +186,7 @@
                  LoadZ( N ), LoadN( N ), &
                  Poisson( N ), Young( N ), &
                  Density ( N ), Thickness( N ), &
-                 Tension( N ), &
+                 Tension( N ), DampingCoef( N ), &
                  LocalDeflection( 6*N ), &
                  LoadVector( 6, N ), &
                  STAT=istat )
@@ -210,7 +211,6 @@
 !    -------------------------------------------------
      at  = CPUTime()
      at0 = RealTime()
-     Isotropic = .TRUE.
 
 !----------------------------------------------------------------------------------------
 !     Non-linear iteration etc.
@@ -323,52 +323,54 @@
 
 !    Solve the system and we are done:
 !    ---------------------------------
-     st = CPUTime()
+     IF (.NOT. GetLogical(SolverParams, 'Linear System Solver Disabled', GotIt)) THEN
+       st = CPUTime()
 
-     PrevNorm = Norm
-     PrevUNorm = Unorm
+       PrevNorm = Norm
+       PrevUNorm = Unorm
 
-!    First iterate is a special case, solving for Lamda=1:
-!    -----------------------------------------------------
-     Norm = DefaultSolve()
+!      First iterate is a special case, solving for Lamda=1:
+!      -----------------------------------------------------
+       Norm = DefaultSolve()
 
 
-     Unorm = 0.0d0
-     DO i = 1, Solver % Mesh % NumberOfNodes
-        j = DeflectionPerm(i)
-        IF(j < 1) CYCLE
-        Unorm = MAX(Unorm, SQRT( Deflection(6*j-5)**2 + &
+       Unorm = 0.0d0
+       DO i = 1, Solver % Mesh % NumberOfNodes
+         j = DeflectionPerm(i)
+         IF(j < 1) CYCLE
+         Unorm = MAX(Unorm, SQRT( Deflection(6*j-5)**2 + &
              Deflection(6*j-4)**2 + Deflection(6*j-3)**2) )
-        Maxcomponent = MAX( Unorm, MAX(MAX(Deflection(6*j-5), &
+         Maxcomponent = MAX( Unorm, MAX(MAX(Deflection(6*j-5), &
              Deflection(6*j-4)),Deflection(6*j-3)) )
-     END DO
-     !PRINT *,'Max deflection =',Unorm
-     MaximumDeflection = Unorm
+       END DO
+       !PRINT *,'Max deflection =',Unorm
+       MaximumDeflection = Unorm
 
-     Unorm = 0.0d0
-     DO i = 1, Solver % Mesh % NumberOfNodes
-        j = DeflectionPerm(i)
-        IF(j < 1) CYCLE
-        Unorm = Unorm + Deflection(6*j-5)**2 + &
-              Deflection(6*j-4)**2 + Deflection(6*j-3)**2
-     END DO
-     Unorm = SQRT( Unorm )
+       Unorm = 0.0d0
+       DO i = 1, Solver % Mesh % NumberOfNodes
+         j = DeflectionPerm(i)
+         IF(j < 1) CYCLE
+         Unorm = Unorm + Deflection(6*j-5)**2 + &
+             Deflection(6*j-4)**2 + Deflection(6*j-3)**2
+       END DO
+       Unorm = SQRT( Unorm )
 
-     IF( ABS(Norm + PrevNorm) > 1.0e-8 )  RelChange = &
-         ABS(Norm - PrevNorm)/ABS(Norm + PrevNorm)
+       IF( ABS(Norm + PrevNorm) > 1.0e-8 )  RelChange = &
+           ABS(Norm - PrevNorm)/ABS(Norm + PrevNorm)
 
-     IF( ABS(UNorm + PrevUNorm) > 1.0e-8) RelUChange = &
-       ABS(UNorm - PrevUnorm)/ABS(UNorm + PrevUNorm)
+       IF( ABS(UNorm + PrevUNorm) > 1.0e-8) RelUChange = &
+           ABS(UNorm - PrevUnorm)/ABS(UNorm + PrevUNorm)
 
-     st = CPUTime() - st
+       st = CPUTime() - st
 
-     WRITE(Message,'(a,F8.2)') 'Solve: (s)', st
-     CALL Info('ShellSolve',Message)
+       WRITE(Message,'(a,F8.2)') 'Solve: (s)', st
+       CALL Info('ShellSolve',Message)
 
-     WRITE(Message,'(a,2F8.3)') 'Relative Change = ',RelChange, RelUChange 
-     CALL Info('ShellSolve',Message)
+       WRITE(Message,'(a,2F8.3)') 'Relative Change = ',RelChange, RelUChange 
+       CALL Info('ShellSolve',Message)
 
-     IF( RelChange < NonlinConvTol ) EXIT
+       IF( RelChange < NonlinConvTol ) EXIT
+     END IF
   END DO    ! NonLinIter
 
   StressComputation = GetLogical( SolverParams, 'Stress Computation', GotIt )
@@ -387,6 +389,12 @@
 !-----------------------------------------------------------------------------
    SUBROUTINE BulkAssembly
 !-----------------------------------------------------------------------------
+     LOGICAL :: MassAssembly
+
+     MassAssembly = EigenOrHarmonicAnalysis(Solver) .OR. &
+         GetLogical(SolverParams, 'Harmonic Mode', GotIt) .OR. &
+         GetLogical(SolverParams, 'Harmonic Analysis', GotIt)
+
      CALL StartAdvanceOutput('ShellSolve', 'Assembly:')
      DO t=1,Solver % NumberOfActiveElements
 !-----------------------------------------------------------------------------
@@ -452,40 +460,46 @@
 
        Density(1:n) = GetReal( Material, 'Density', GotIt )
        IF( .NOT.GotIt ) THEN
-          Density = 0.0d0
-          IF( TransientSimulation .OR. (Solver % NOfEigenvalues > 0) ) &
-               CALL Fatal( 'ShellSolver', 'Density required' )
+         IF( TransientSimulation .OR. MassAssembly) &
+             CALL Fatal( 'ShellSolver', 'Density required' )
        END IF
 
        Poisson(1:n) = GetReal( Material, 'Poisson ratio', GotIt )
-       IF( Isotropic .AND. (.NOT.GotIt) ) &
-                     CALL Fatal( 'ShellSolver', 'Poisson ratio undefined' )
+       IF( .NOT.GotIt ) &
+           CALL Fatal( 'ShellSolver', 'Poisson ratio undefined' )
 
        Young(1:n) = GetReal( Material, 'Youngs modulus', GotIt )
-       IF( Isotropic .AND. (.NOT.GotIt) ) &
-                     CALL Fatal( 'ShellSolver', 'Youngs modulus undefined' )
+       IF( .NOT.GotIt ) &
+           CALL Fatal( 'ShellSolver', 'Youngs modulus undefined' )
 
        Thickness(1:n) = GetReal( Material, 'Thickness', GotIt )
-       IF( Isotropic .AND. (.NOT.GotIt) ) &
-                     CALL Fatal( 'ShellSolver', 'Thickness undefined' )
+       IF( .NOT.GotIt ) THEN
+         Thickness(1:n) = GetReal( Material, 'Shell Thickness', GotIt )
+         IF( .NOT.GotIt ) CALL Fatal( 'ShellSolver', 'Shell Thickness/Thickness undefined' )
+       END IF
 
        Tension(1:n) = GetReal( Material, 'Tension', GotIt )
        IF( .NOT. GotIt ) Tension = 0.0d0
 
-       CALL LocalMatrix(  STIFF, DAMP, MASS, &
+       DampingCoef(1:n) = GetReal( Material, 'Rayleigh Damping Alpha', GotIt )
+
+       CALL LocalMatrix( STIFF, DAMP, MASS, &
             FORCE, LoadX, LoadY, LoadZ, LoadN, CurrentElement, n, &
             ElementNodes, StabParam1, StabParam2, t, Poisson,     &
-            Young, LocalDeflection, LargeDeflection,  &
+            Young, DampingCoef, LocalDeflection, LargeDeflection,  &
             StabilityAnalysis, Nvector )
 
        IF( TransientSimulation ) THEN
-          CALL Default2ndOrderTime( MASS, DAMP, STIFF, FORCE )
+         CALL Default2ndOrderTime( MASS, DAMP, STIFF, FORCE )
+       ELSE IF ( MassAssembly ) THEN
+         CALL DefaultUpdateMass( MASS )
+         CALL DefaultUpdateDamp( DAMP )
        END IF
 
 !      Update global matrix and rhs vector from local matrix & vector:
 !      ---------------------------------------------------------------
        CALL DefaultUpdateEquations( STIFF, FORCE )
-       IF ( EigenOrHarmonicAnalysis() ) CALL DefaultUpdateMass( MASS )
+
      END DO
 !-----------------------------------------------------------------------------
     END SUBROUTINE BulkAssembly
@@ -895,16 +909,19 @@
      SUBROUTINE LocalMatrix( STIFF, DAMP, MASS, &
           FORCE, NodalLoadX, NodalLoadY, NodalLoadZ, NodalLoadN, &
           Element, N, Nodes, StabParam1, StabParam2, &
-          ElementNumber, NodalPoisson, NodalYoung, &
+          ElementNumber, NodalPoisson, NodalYoung, NodalDampingCoef, &
           LocalDeflection, LargeDeflection, StabilityAnalysis, Nvector )
 !------------------------------------------------------------------------------
+       USE SolidMechanicsUtils, ONLY: StrainEnergyDensity, ShearCorrectionFactor, &
+           IsotropicElasticity
+
        REAL(KIND=dp) :: STIFF(:,:), DAMP(:,:), MASS(:,:), &
             Amatrix(3,3), Bmatrix(3,3), Dmatrix(3,3), Astarmatrix(2,2)
        REAL(KIND=dp) :: FORCE(:)
        REAL(KIND=dp) :: NodalLoadX(:), NodalLoadY(:), NodalLoadZ(:), &
            NodalLoadN(:), LocalDeflection(:), Nvector(:)
        REAL(KIND=dp) :: StabParam1, StabParam2
-       REAL(KIND=dp) :: NodalPoisson(:), NodalYoung(:)
+       REAL(KIND=dp) :: NodalPoisson(:), NodalYoung(:), NodalDampingCoef(:)
        LOGICAL :: LargeDeflection, StabilityAnalysis
        INTEGER :: N, ElementNumber
        TYPE(Nodes_t) :: Nodes
@@ -918,7 +935,7 @@
             Omega(1,MaxDofs), Gdrilling(1,1), GradDeflection(2,MaxDofs), & !*
             ZetaStrain(3,maxDofs)
 
-       REAL(KIND=dp) :: detJ, U, V, W, S, SCF, rho, h, &
+       REAL(KIND=dp) :: detJ, U, V, W, S, SCF, rho, h, DampCoef, &
             LoadN, LoadX, LoadY, LoadZ, Nmatrix(2,2), &
             GradTest(2), GradBasis(2), LV1(3,1), LV2(3,1), TempVec(3,1), &
             NormalForce(2,2), NonLinForce(MaxDofs), LV3(3,1)
@@ -1032,6 +1049,7 @@
          LoadN = SUM( NodalLoadN(1:n) * Basis(1:n) )
          rho   = SUM( Density(1:n)    * Basis(1:n) )
          h     = SUM( Thickness(1:n)  * Basis(1:n) )
+         DampCoef = SUM( NodalDampingCoef(1:n) * Basis(1:n) )
 
          CALL IsotropicElasticity( Dmatrix, &
              Astarmatrix, NodalPoisson, NodalYoung, Thickness, Basis, n )
@@ -1176,7 +1194,7 @@
             END IF
          END DO
 
-         CALL AddEnergy(STIFF, Dmatrix, Kappa, 3, 6*n, s)
+         CALL StrainEnergyDensity(STIFF, Dmatrix, Kappa, 3, 6*n, s)
 
 !        In-plane stiffness:
 !        -------------------
@@ -1198,7 +1216,7 @@
             END IF
          END DO
 
-         CALL AddEnergy(STIFF, Amatrix, EPS, 3, 6*n, s)
+         CALL StrainEnergyDensity(STIFF, Amatrix, EPS, 3, 6*n, s)
 
 !        Coupling through the B-matrix:
 !        ------------------------------
@@ -1241,7 +1259,7 @@
             Gammaa(1:2,6*p-3) = dBasisdx(p,1:2)
          END DO
 
-         CALL AddEnergy(STIFF, Astarmatrix, Gammaa, 2, 6*n, SCF*s)
+         CALL StrainEnergyDensity(STIFF, Astarmatrix, Gammaa, 2, 6*n, SCF*s)
 
 !        Drilling DOFs (in-plane rotations):
 !        -----------------------------------
@@ -1252,7 +1270,7 @@
             Omega(1,6*p-0) =  Basis(p)              !  rotation
          END DO
 
-         CALL AddEnergy(STIFF, Gdrilling, Omega, 1, 6*n, s)
+         CALL StrainEnergyDensity(STIFF, Gdrilling, Omega, 1, 6*n, s)
 
 !        Newton lin. terms:
 !        -----------------
@@ -1394,7 +1412,7 @@
             END DO
          END IF
 
-!        Mass matrix (only translation):
+!        Mass matrix
 !        -------------------------------
          IF( .NOT.StabilityAnalysis ) THEN
            DO p = 1,n
@@ -1405,11 +1423,13 @@
                    + rho * h * Basis(p) * Basis(q) * s
                MASS(6*p-3,6*q-3) = MASS(6*p-3,6*q-3) &
                    + rho * h * Basis(p) * Basis(q) * s
+               MASS(6*p-2,6*q-2) = MASS(6*p-2,6*q-2) &
+                   + rho * h**3/12.0d0 *  Basis(p) * Basis(q) * s
+               MASS(6*p-1,6*q-1) = MASS(6*p-1,6*q-1) &
+                   + rho * h**3/12.0d0 *  Basis(p) * Basis(q) * s
              END DO
            END DO
-         END IF
-
-         IF( StabilityAnalysis ) THEN
+         ELSE
             DO p = 1,n
                GradTest(1:2) = dBasisdx(p,1:2)
                DO q = 1,n
@@ -1422,6 +1442,21 @@
                END DO
             END DO
          END IF
+
+!
+!        Mass-proportional damping matrix (for translations only):
+!        ---------------------------------------------------------
+         DO p = 1,n
+           DO q = 1,n
+             Damp(6*p-5,6*q-5) = Damp(6*p-5,6*q-5) &
+                 + DampCoef * rho * h * Basis(p) * Basis(q) * s
+             Damp(6*p-4,6*q-4) = Damp(6*p-4,6*q-4) &
+                 + DampCoef * rho * h * Basis(p) * Basis(q) * s
+             Damp(6*p-3,6*q-3) = Damp(6*p-3,6*q-3) &
+                 + DampCoef * rho * h * Basis(p) * Basis(q) * s
+           END DO
+         END DO
+
       END DO
 
 !      Restore the original node points:
@@ -1449,10 +1484,10 @@
        STIFF(1:i,1:i) = MATMUL( STIFF(1:i,1:i), Tblock(1:i,1:i) )
        STIFF(1:i,1:i) = MATMUL( TRANSPOSE( Tblock(1:i,1:i) ), STIFF(1:i,1:i) )
 
-       IF( StabilityAnalysis ) THEN
-         MASS(1:i,1:i) = MATMUL( MASS(1:i,1:i), Tblock(1:i,1:i) )
-         MASS(1:i,1:i) = MATMUL( TRANSPOSE( Tblock(1:i,1:i) ), MASS(1:i,1:i) )
-       END IF
+!       IF( StabilityAnalysis ) THEN
+       MASS(1:i,1:i) = MATMUL( MASS(1:i,1:i), Tblock(1:i,1:i) )
+       MASS(1:i,1:i) = MATMUL( TRANSPOSE( Tblock(1:i,1:i) ), MASS(1:i,1:i) )
+!       END IF
 
        IF( LargeDeflection ) THEN
           NonlinForce(1:i) = MATMUL( TRANSPOSE(Tblock(1:i,1:i)), NonlinForce(1:i) )
@@ -1479,10 +1514,13 @@
          FORCE = FORCE + NonlinForce
        END IF
 
-       IF( StabilityAnalysis ) THEN
-         MASS(1:i,1:i) = MATMUL( MASS(1:i,1:i), Tblock(1:i,1:i) )
-         MASS(1:i,1:i) = MATMUL( TRANSPOSE( Tblock(1:i,1:i) ), MASS(1:i,1:i) )
-       END IF
+!       IF( StabilityAnalysis ) THEN
+       MASS(1:i,1:i) = MATMUL( MASS(1:i,1:i), Tblock(1:i,1:i) )
+       MASS(1:i,1:i) = MATMUL( TRANSPOSE( Tblock(1:i,1:i) ), MASS(1:i,1:i) )
+!       END IF
+
+       Damp(1:i,1:i) = MATMUL( Damp(1:i,1:i), Tblock(1:i,1:i) )
+       Damp(1:i,1:i) = MATMUL( TRANSPOSE( Tblock(1:i,1:i) ), Damp(1:i,1:i) )
 
        STIFF = ( STIFF + TRANSPOSE(STIFF) ) / 2.0d0
        MASS  = ( MASS  + TRANSPOSE(MASS) )  / 2.0d0
@@ -1498,7 +1536,9 @@
           Mten, MtenMaterial, NodalYoung, NodalPoisson, NodalThickness, &
           LargeDeflection )
 !------------------------------------------------------------------------------
+       USE SolidMechanicsUtils, ONLY: ShearCorrectionFactor, IsotropicElasticity
        IMPLICIT NONE
+
        REAL(KIND=dp) :: StabParam1, StabParam2, LocalDeflection(:), &
             Weight3(:), Weight4(:), Eps(3,3), Kap(3,3), NTen(3,3), MTen(3,3), &
             NtenMaterial(2,2), MtenMaterial(2,2),  &
@@ -1923,6 +1963,7 @@
 !------------------------------------------------------------------------------
      FUNCTION LocalBasis( Nodes, n ) RESULT( BasisVectors )
 !------------------------------------------------------------------------------
+       USE ElementDescription, ONLY: CrossProduct
        TYPE(Nodes_t) :: Nodes
        REAL(KIND=dp) :: BasisVectors(3,3)
        INTEGER :: n
@@ -1947,42 +1988,10 @@
        BasisVectors(1:3,1) = Tangent1
        BasisVectors(1:3,2) = Tangent2 - SUM( Tangent1 * Tangent2 ) * Tangent1
        BasisVectors(1:3,2) = BasisVectors(1:3,2) / SQRT( SUM( BasisVectors(1:3,2)**2 ) )
-       BasisVectors(1:3,3) = CrossProductL( BasisVectors(1:3,1), BasisVectors(1:3,2) )
+       BasisVectors(1:3,3) = CrossProduct( BasisVectors(1:3,1), BasisVectors(1:3,2) )
 !------------------------------------------------------------------------------       
      END FUNCTION LocalBasis
 !------------------------------------------------------------------------------       
-
-
-!------------------------------------------------------------------------------       
-     SUBROUTINE IsotropicElasticity(Ematrix, &
-          Gmatrix,Poisson,Young,Thickness,Basis,n)
-!------------------------------------------------------------------------------
-     REAL(KIND=dp) :: Ematrix(:,:), Gmatrix(:,:), Basis(:)
-     REAL(KIND=dp) :: Poisson(:), Young(:), Thickness(:)
-     REAL(KIND=dp) :: Euvw, Puvw, Guvw, Tuvw
-     INTEGER :: n
-!------------------------------------------------------------------------------
-       Euvw = SUM( Young(1:n)    * Basis(1:n) )
-       Puvw = SUM( Poisson(1:n)  * Basis(1:n) )
-       Tuvw = SUM( Thickness(1:n)* Basis(1:n) )
-       Guvw = Euvw/(2.0d0*(1.0d0 + Puvw))
-
-       Ematrix = 0.0d0
-       Ematrix(1,1) = 1.0d0
-       Ematrix(1,2) = Puvw
-       Ematrix(2,1) = Puvw
-       Ematrix(2,2) = 1.0d0
-       Ematrix(3,3) = (1.0d0-Puvw)/2.0d0
-       Ematrix = Ematrix * Euvw * (Tuvw**3) / (12.0d0 * (1.0d0 - Puvw*Puvw))
-
-       Gmatrix = 0.0d0
-       Gmatrix(1,1) = Guvw*Tuvw
-       Gmatrix(2,2) = Guvw*Tuvw
-!------------------------------------------------------------------------------
-     END SUBROUTINE IsotropicElasticity
-!------------------------------------------------------------------------------
-
-!==============================================================================
 
 !------------------------------------------------------------------------------
      SUBROUTINE IsotropicInPlaneElasticity( Ematrix, &
@@ -2009,89 +2018,6 @@
      END SUBROUTINE IsotropicInPlaneElasticity
 !------------------------------------------------------------------------------
 
-!==============================================================================
-
-!------------------------------------------------------------------------------
-     SUBROUTINE ShearCorrectionFactor(Kappa,Thickness,x,y,n,StabParam)
-!------------------------------------------------------------------------------
-       REAL(KIND=dp) :: Kappa,Thickness,x(:),y(:),StabParam
-       INTEGER :: n
-!------------------------------------------------------------------------------
-       REAL(KIND=dp) :: x21,x32,x43,x13,x14,y21,y32,y43,y13,y14, &
-            l21,l32,l43,l13,l14,alpha,h
-!------------------------------------------------------------------------------
-       Kappa = 1.0d0
-       SELECT CASE(n)
-          CASE(3)
-             alpha = 0.20d0 * StabParam
-             x21 = x(2)-x(1)
-             x32 = x(3)-x(2)
-             x13 = x(1)-x(1)
-             y21 = y(2)-y(1)
-             y32 = y(3)-y(2)
-             y13 = y(1)-y(1)
-             l21 = SQRT(x21**2 + y21**2)
-             l32 = SQRT(x32**2 + y32**2)
-             l13 = SQRT(x13**2 + y13**2)
-             h = MAX(l21,l32,l13)
-             Kappa = (Thickness**2)/(Thickness**2 + alpha*(h**2))
-          CASE(4)
-             alpha = 0.10d0 * StabParam
-             x21 = x(2)-x(1)
-             x32 = x(3)-x(2)
-             x43 = x(4)-x(3)
-             x14 = x(1)-x(4)
-             y21 = y(2)-y(1)
-             y32 = y(3)-y(2)
-             y43 = y(4)-y(3)
-             y14 = y(1)-y(4)
-             l21 = SQRT(x21**2 + y21**2)
-             l32 = SQRT(x32**2 + y32**2)
-             l43 = SQRT(x43**2 + y43**2)
-             l14 = SQRT(x14**2 + y14**2)
-             h = MAX(l21,l32,l43,l14)
-             Kappa = (Thickness**2)/(Thickness**2 + alpha*(h**2))
-           CASE DEFAULT
-             CALL Fatal('ShellSolver','Illegal number of nodes for Smitc elements')
-           END SELECT
-!------------------------------------------------------------------------------
-     END SUBROUTINE ShearCorrectionFactor
-!------------------------------------------------------------------------------
-
-!==============================================================================
-
-!------------------------------------------------------------------------------
-     SUBROUTINE AddEnergy(A,B,C,m,n,s)
-!------------------------------------------------------------------------------
-!      Performs the operation
-!
-!         A = A + C' * B * C * s
-!
-!      with
-!
-!         Size( A ) = n x n
-!         Size( B ) = m x m
-!         Size( C ) = m x n
-!------------------------------------------------------------------------------
-       REAL(KIND=dp) :: A(:,:),B(:,:),C(:,:),s
-       INTEGER :: m,n
-!------------------------------------------------------------------------------
-       INTEGER :: i,j,k,l
-!------------------------------------------------------------------------------
-       DO i=1,n
-          DO j=1,n
-             DO k=1,m
-                DO l=1,m
-                   A(i,j) = A(i,j) + C(k,i)*B(k,l)*C(l,j) * s
-                END DO
-             END DO
-          END DO
-       END DO
-!------------------------------------------------------------------------------
-     END SUBROUTINE AddEnergy
-!------------------------------------------------------------------------------
-
-!==============================================================================
 
 !------------------------------------------------------------------------------
      SUBROUTINE AddInnerProducts(A,B,C,D,m,n,s)
@@ -2130,6 +2056,7 @@
 !------------------------------------------------------------------------------
      SUBROUTINE CovariantInterpolation(ShearStrain,Basis,X,Y,U,V,n)
 !------------------------------------------------------------------------------
+       USE SolidMechanicsUtils, ONLY: Jacobi3, Jacobi4 
        REAL(KIND=dp) :: ShearStrain(:,:),Basis(:),X(:),Y(:),U,V
        INTEGER :: n
 !------------------------------------------------------------------------------
@@ -2283,77 +2210,6 @@
      END SUBROUTINE CovariantInterpolation
 !------------------------------------------------------------------------------
 
-!==============================================================================
-
-!------------------------------------------------------------------------------
-     SUBROUTINE Jacobi3(Jmat,invJ,detJ,x,y)
-!------------------------------------------------------------------------------
-       REAL(KIND=dp) :: Jmat(:,:),invJ(:,:),detJ,x(:),y(:)
-!------------------------------------------------------------------------------
-       Jmat(1,1) = x(2)-x(1)
-       Jmat(2,1) = x(3)-x(1)
-       Jmat(1,2) = y(2)-y(1)
-       Jmat(2,2) = y(3)-y(1)
-
-       detJ = Jmat(1,1)*Jmat(2,2)-Jmat(1,2)*Jmat(2,1)
-
-       invJ(1,1) =  Jmat(2,2)/detJ
-       invJ(2,2) =  Jmat(1,1)/detJ
-       invJ(1,2) = -Jmat(1,2)/detJ
-       invJ(2,1) = -Jmat(2,1)/detJ
-!------------------------------------------------------------------------------
-     END SUBROUTINE Jacobi3
-!------------------------------------------------------------------------------
-
-!==============================================================================
-
-!------------------------------------------------------------------------------
-     SUBROUTINE Jacobi4(Jmat,invJ,detJ,xi,eta,x,y)
-!------------------------------------------------------------------------------
-       REAL(KIND=dp) :: Jmat(:,:),invJ(:,:),detJ,xi,eta,x(:),y(:)
-!------------------------------------------------------------------------------
-       REAL(KIND=dp) :: dNdxi(4), dNdeta(4)
-       INTEGER :: i
-
-       dNdxi(1) = -(1-eta)/4.0d0
-       dNdxi(2) =  (1-eta)/4.0d0
-       dNdxi(3) =  (1+eta)/4.0d0
-       dNdxi(4) = -(1+eta)/4.0d0
-       dNdeta(1) = -(1-xi)/4.0d0
-       dNdeta(2) = -(1+xi)/4.0d0
-       dNdeta(3) =  (1+xi)/4.0d0
-       dNdeta(4) =  (1-xi)/4.0d0
-       
-       Jmat = 0.0d0
-       DO i=1,4
-          Jmat(1,1) = Jmat(1,1) + dNdxi(i)*x(i)
-          Jmat(1,2) = Jmat(1,2) + dNdxi(i)*y(i)
-          Jmat(2,1) = Jmat(2,1) + dNdeta(i)*x(i)
-          Jmat(2,2) = Jmat(2,2) + dNdeta(i)*y(i)
-       END DO
-
-       detJ = Jmat(1,1)*Jmat(2,2)-Jmat(1,2)*Jmat(2,1)
-
-       invJ(1,1) = Jmat(2,2)/detJ
-       invJ(2,2) = Jmat(1,1)/detJ
-       invJ(1,2) = -Jmat(1,2)/detJ
-       invJ(2,1) = -Jmat(2,1)/detJ
-!------------------------------------------------------------------------------
-     END SUBROUTINE Jacobi4
-!------------------------------------------------------------------------------
-
-!==============================================================================
-
-!------------------------------------------------------------------------------
-     FUNCTION CrossProductL( v1, v2 ) RESULT( v3 )
-!------------------------------------------------------------------------------
-       REAL(KIND=dp) :: v1(3), v2(3), v3(3)
-       v3(1) =  v1(2)*v2(3) - v1(3)*v2(2)
-       v3(2) = -v1(1)*v2(3) + v1(3)*v2(1)
-       v3(3) =  v1(1)*v2(2) - v1(2)*v2(1)
-!------------------------------------------------------------------------------
-     END FUNCTION CrossProductL
-!------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
 END SUBROUTINE ShellSolver

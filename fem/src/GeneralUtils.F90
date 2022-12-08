@@ -40,7 +40,7 @@
 !> \}
 
 !-----------------------------------------------------------------------------
-!>  Miscallenous utilities.
+!>  Miscellaneous utilities.
 !-----------------------------------------------------------------------------
 MODULE GeneralUtils
 
@@ -157,7 +157,8 @@ CONTAINS
     INTEGER, INTENT(in) :: ival
     CHARACTER(LEN=12) :: str
 !------------------------------------------------------------------------------
-    INTEGER :: i,j,n,m,t,v
+    INTEGER :: i,j,n,t,v
+    INTEGER(8) :: m
     CHARACTER, PARAMETER :: DIGITS(0:9)=['0','1','2','3','4','5','6','7','8','9']
 !------------------------------------------------------------------------------
      str = ' '
@@ -891,7 +892,7 @@ CONTAINS
             GO TO 2
 1           CLOSE(IncludeUnit)
             IncludeUnit = IncludeUnit+1
-            READ( Unit,'(A)',END=10,ERR=10 ) readstr
+            READ( IncludeUnit,'(A)',END=10,ERR=10 ) readstr
 2           CONTINUE
           ELSE
             READ( Unit,'(A)',END=10,ERR=10 ) readstr
@@ -1015,7 +1016,7 @@ CONTAINS
      END IF
      
      IF ( PRESENT( Echo ) ) THEN
-        IF ( Echo ) WRITE( 6, '(a)' ) readstr(1:inlen)
+        IF ( Echo .AND. inlen > 0 ) WRITE( 6, '(a)' ) readstr(1:inlen)
      END IF
 
      i = 1
@@ -1683,7 +1684,7 @@ END FUNCTION ComponentNameVar
 !------------------------------------------------------------------------------
 !> Integrate a curve given by linear table or splines.
 !------------------------------------------------------------------------------
-   PURE FUNCTION IntegrateCurve(TValues,FValues,CubicCoeff,T0,T1,Cumulative) RESULT(sumf)
+   FUNCTION IntegrateCurve(TValues,FValues,CubicCoeff,T0,T1,Cumulative,Found) RESULT(sumf)
 !------------------------------------------------------------------------------
      REAL(KIND=dp) :: sumf
 
@@ -1691,22 +1692,35 @@ END FUNCTION ComponentNameVar
      REAL(KIND=dp), OPTIONAL, INTENT(in) :: T0, T1
      REAL(KIND=dp), OPTIONAL, INTENT(in) :: Cumulative(:)
      REAL(KIND=dp), OPTIONAL, POINTER, INTENT(in) :: CubicCoeff(:)
+     LOGICAL, OPTIONAL :: Found 
 !------------------------------------------------------------------------------
      INTEGER :: i,n,i0,i1
      LOGICAL :: Cubic
      REAL(KIND=dp) :: t(2), y(2), r(2), h, a, b, c, d, s0, s1, tt0, tt1
 !------------------------------------------------------------------------------
-     n = SIZE(TValues)
 
+     sumf = 0.0_dp
+     IF(PRESENT(Found)) Found = .FALSE.
+     
+     n = SIZE(TValues)
+     IF(n<2) RETURN
+
+     IF(SIZE(FValues) /= n ) THEN
+       CALL Warn('IntegrateCurve','TValues and Fvalues should be of same size!')
+       RETURN
+     END IF
+             
      tt0 = TValues(1)
      IF(PRESENT(t0)) tt0=t0
 
      tt1 = TValues(n)
      IF(PRESENT(t1)) tt1=t1
 
-     sumf = 0._dp
      IF(tt0>=tt1) RETURN
 
+     IF(PRESENT(Found)) Found = .TRUE.
+
+     
      ! t0 < first, t1 <= first
      IF(tt1<=Tvalues(1)) THEN
        t(1) = Tvalues(1)
@@ -2054,7 +2068,7 @@ INCLUDE "mpif.h"
       Matrix % Symmetric = .FALSE.
       Matrix % SolveCount   = 0
       Matrix % NumberOfRows = 0
-
+      Matrix % Ndeg = -1
       Matrix % ProjectorBC = 0
       Matrix % ProjectorType = PROJECTOR_TYPE_DEFAULT
       
@@ -2113,20 +2127,17 @@ INCLUDE "mpif.h"
     INTEGER :: istat
 !------------------------------------------------------------------------------
 
-    istat = -1
     ALLOCATE( F(n), STAT=istat )
     IF ( istat /=  0 ) THEN
-       IF ( PRESENT( FailureMessage  ) ) THEN
-          WRITE( Message, * )'Unable to allocate ', n, ' element real array.'
-          CALL Error( 'AllocateRealVector', Message )
-          IF ( PRESENT( From ) ) THEN
-             WRITE( Message, * )'Requested From: ', TRIM(From)
-             CALL Error( 'AllocateRealVector', Message )
-          END IF
-          IF ( PRESENT( FailureMessage ) ) THEN
-             CALL Fatal( 'AllocateRealVector', FailureMessage )
-          END IF
-       END IF
+      WRITE( Message, * )'Unable to allocate ', n, ' element real array.'
+      CALL Error( 'AllocateRealVector', Message )
+      IF ( PRESENT( From ) ) THEN
+        WRITE( Message, * )'Requested From: ', TRIM(From)
+        CALL Error( 'AllocateRealVector', Message )
+      END IF
+      IF ( PRESENT( FailureMessage ) ) THEN
+        CALL Fatal( 'AllocateRealVector', FailureMessage )
+      END IF
     END IF
 !------------------------------------------------------------------------------
   END SUBROUTINE AllocateRealVector
@@ -2143,20 +2154,17 @@ INCLUDE "mpif.h"
     INTEGER :: istat
 !------------------------------------------------------------------------------
 
-    istat = -1
     ALLOCATE( f(n), STAT=istat )
     IF ( istat /=  0 ) THEN
-       IF ( PRESENT( FailureMessage  ) ) THEN
-          WRITE( Message, * )'Unable to allocate ', n, ' element real array.'
-          CALL Error( 'AllocateComplexVector', Message )
-          IF ( PRESENT( From ) ) THEN
-             WRITE( Message, * )'Requested From: ', TRIM(From)
-             CALL Error( 'AllocateComplexVector', Message )
-          END IF
-          IF ( PRESENT( FailureMessage ) ) THEN
-             CALL Fatal( 'AllocateComplexVector', FailureMessage )
-          END IF
-       END IF
+      WRITE( Message, * )'Unable to allocate ', n, ' element complex array.'
+      CALL Error( 'AllocateComplexVector', Message )
+      IF ( PRESENT( From ) ) THEN
+        WRITE( Message, * )'Requested From: ', TRIM(From)
+        CALL Error( 'AllocateComplexVector', Message )
+      END IF
+      IF ( PRESENT( FailureMessage ) ) THEN
+        CALL Fatal( 'AllocateComplexVector', FailureMessage )
+      END IF
     END IF
 !------------------------------------------------------------------------------
   END SUBROUTINE AllocateComplexVector
@@ -2173,20 +2181,17 @@ INCLUDE "mpif.h"
     INTEGER :: istat
 !------------------------------------------------------------------------------
 
-    istat = -1
     ALLOCATE( f(n), STAT=istat )
     IF ( istat /=  0 ) THEN
-       IF ( PRESENT( FailureMessage  ) ) THEN
-          WRITE( Message, * )'Unable to allocate ', n, ' element integer array.'
-          CALL Error( 'AllocateIntegerVector', Message )
-          IF ( PRESENT( From ) ) THEN
-             WRITE( Message, * )'Requested From: ', TRIM(From)
-             CALL Error( 'AllocateIntegerVector', Message )
-          END IF
-          IF ( PRESENT( FailureMessage ) ) THEN
-             CALL Fatal( 'AllocateIntegerVector', FailureMessage )
-          END IF
-       END IF
+      WRITE( Message, * )'Unable to allocate ', n, ' element integer array.'
+      CALL Error( 'AllocateIntegerVector', Message )
+      IF ( PRESENT( From ) ) THEN
+        WRITE( Message, * )'Requested From: ', TRIM(From)
+        CALL Error( 'AllocateIntegerVector', Message )
+      END IF
+      IF ( PRESENT( FailureMessage ) ) THEN
+        CALL Fatal( 'AllocateIntegerVector', FailureMessage )
+      END IF
     END IF
 !------------------------------------------------------------------------------
   END SUBROUTINE AllocateIntegerVector
@@ -2203,20 +2208,17 @@ INCLUDE "mpif.h"
     INTEGER :: istat
 !------------------------------------------------------------------------------
 
-    istat = -1
     ALLOCATE( f(n), STAT=istat )
     IF ( istat /=  0 ) THEN
-       IF ( PRESENT( FailureMessage  ) ) THEN
-          WRITE( Message, * )'Unable to allocate ', n, ' element integer array.'
-          CALL Error( 'AllocateLogicalVector', Message )
-          IF ( PRESENT( From ) ) THEN
-             WRITE( Message, * )'Requested From: ', TRIM(From)
-             CALL Error( 'AllocateLogicalVector', Message )
-          END IF
-          IF ( PRESENT( FailureMessage ) ) THEN
-             CALL Fatal( 'AllocateLogicalVector', FailureMessage )
-          END IF
-       END IF
+      WRITE( Message, * )'Unable to allocate ', n, ' element logical array.'
+      CALL Error( 'AllocateLogicalVector', Message )
+      IF ( PRESENT( From ) ) THEN
+        WRITE( Message, * )'Requested From: ', TRIM(From)
+        CALL Error( 'AllocateLogicalVector', Message )
+      END IF
+      IF ( PRESENT( FailureMessage ) ) THEN
+        CALL Fatal( 'AllocateLogicalVector', FailureMessage )
+      END IF
     END IF
 !------------------------------------------------------------------------------
   END SUBROUTINE AllocateLogicalVector
@@ -2233,10 +2235,9 @@ INCLUDE "mpif.h"
     INTEGER :: istat
 !------------------------------------------------------------------------------
 
-    istat = -1
     ALLOCATE( f(n), STAT=istat )
     IF ( istat /=  0 ) THEN
-      WRITE( Message, * )'Unable to allocate ', n, ' element integer array.'
+      WRITE( Message, * )'Unable to allocate structured ', n, ' element array.'
       CALL Error( 'AllocateElementVector', Message )
       IF ( PRESENT( From ) ) THEN
         WRITE( Message, * )'Requested From: ', TRIM(From)
@@ -2261,9 +2262,8 @@ INCLUDE "mpif.h"
     INTEGER :: istat
 !------------------------------------------------------------------------------
 
-    istat = -1
     ALLOCATE( f(n1,n2), STAT=istat )
-    if ( istat /=  0 ) THEN
+    IF ( istat /=  0 ) THEN
       WRITE( Message, * )'Unable to allocate ', n1, ' by ', n2, ' element real matrix.'
       CALL Error( 'AllocateRealArray', Message )
       IF ( PRESENT( From ) ) THEN
@@ -2288,10 +2288,9 @@ INCLUDE "mpif.h"
     INTEGER :: istat
 !------------------------------------------------------------------------------
 
-    istat = -1
     ALLOCATE( f(n1,n2), STAT=istat )
-    if ( istat /=  0 ) THEN
-      WRITE( Message, * )'Unable to allocate ', n1, ' by ', n2, ' element real matrix.'
+    IF ( istat /=  0 ) THEN
+      WRITE( Message, * )'Unable to allocate ', n1, ' by ', n2, ' element complex matrix.'
       CALL Error( 'AllocateComplexArray', Message )
       IF ( PRESENT( From ) ) THEN
         WRITE( Message, * )'Requested From: ', TRIM(From)
@@ -2352,7 +2351,7 @@ INCLUDE "mpif.h"
        ALLOCATE( f(n1,n2), STAT=istat )
     END IF
     IF ( istat /=  0 ) THEN
-      WRITE( Message, * )'Unable to allocate ', n1, ' by ', n2, ' element integer matrix.'
+      WRITE( Message, * )'Unable to allocate ', n1, ' by ', n2, ' element logical matrix.'
       CALL Error( 'AllocateLogicalArray', Message )
       IF ( PRESENT( From ) ) THEN
         WRITE( Message, * )'Requested From: ', TRIM(From)
@@ -2453,20 +2452,23 @@ INCLUDE "mpif.h"
 !> Given the filename0 add a string related to the partitioning.
 !------------------------------------------------------------------------------
 
-  FUNCTION AddFilenameParSuffix(Filename0,Suffix0,Parallel,MyPe) RESULT (Filename)
+  FUNCTION AddFilenameParSuffix(Filename0,Suffix0,Parallel,MyPe,NumWidth,PeMax,PeSeparator) RESULT (Filename)
 
     CHARACTER(LEN=MAX_NAME_LEN) :: Filename0
     CHARACTER(LEN=*), OPTIONAL :: Suffix0 
+    CHARACTER(LEN=*), OPTIONAL :: PeSeparator
     LOGICAL :: Parallel
     INTEGER :: MyPe
+    INTEGER, OPTIONAL :: NumWidth
+    INTEGER, OPTIONAL :: PeMax
     CHARACTER(LEN=MAX_NAME_LEN) :: Filename
-    CHARACTER(LEN=MAX_NAME_LEN) :: Prefix, Suffix
-    INTEGER :: No, ind, len
-
+ !------------------------------------------------------------------------------   
+    CHARACTER(LEN=MAX_NAME_LEN) :: OutStyle, Prefix, Suffix
+    INTEGER :: No, ind, len, NumW, NoLim
 
     ind = INDEX( FileName0,'.',.TRUE. )
     len = LEN_TRIM(Filename0)
-
+    
     ! If the only dot is the first one it only related to the current working directory.
     IF(ind > 1) THEN
       Prefix = Filename0(1:ind-1)
@@ -2482,10 +2484,25 @@ INCLUDE "mpif.h"
     
     IF( Parallel ) THEN
       No = MyPe + 1
-      IF( No < 10000 ) THEN
-        WRITE( FileName,'(A,I4.4,A)') TRIM(Prefix),No,TRIM(Suffix)
+   
+      IF( PRESENT(NumWidth) ) THEN
+        NumW = NumWidth
+      ELSE IF( PRESENT( PeMax ) ) THEN
+        NumW = CEILING( LOG10( 1.0_dp * PeMax ) )
       ELSE
+        NumW = 4
+      END IF
+      NoLim = 10**NumW
+
+      IF( PRESENT( PeSeparator ) ) THEN
+        Prefix = TRIM(Prefix)//TRIM(PeSeparator)
+      END IF
+              
+      IF( No >= NoLim ) THEN
         WRITE( FileName,'(A,I0,A)') TRIM(Prefix),No,TRIM(Suffix)
+      ELSE
+        WRITE( OutStyle,'(A,I1,A,I1,A)') '(A,I',NumW,'.',NumW,',A)'
+        WRITE( FileName,OutStyle) TRIM(Prefix),No,TRIM(Suffix)
       END IF
     ELSE
       FileName = TRIM(Prefix)//TRIM(Suffix)
@@ -2496,6 +2513,49 @@ INCLUDE "mpif.h"
 !------------------------------------------------------------------------------
 
 
+  ! This takes union of two integer vectors
+  ! and returns the number of common values. 
+  !---------------------------------------------
+  FUNCTION CountSameIntegers(v1,v2,vsame) RESULT ( n )
+    INTEGER, POINTER :: v1(:), v2(:)
+    INTEGER, POINTER, OPTIONAL :: vsame(:)
+    INTEGER :: n
+
+    INTEGER :: i1,i2
+
+    n = 0
+    IF(.NOT. ASSOCIATED(v1)) RETURN
+    IF(.NOT. ASSOCIATED(v2)) RETURN
+    
+    DO i1=1,SIZE(v1)
+      DO i2=1,SIZE(v2)
+        IF( v1(i1) == v2(i2) ) n = n+1
+      END DO
+    END DO
+
+    IF(n==0) RETURN
+    
+    IF( PRESENT(vsame) ) THEN
+      IF(.NOT. ASSOCIATED(vsame) ) THEN
+        ALLOCATE(vsame(n) )
+      END IF
+      vsame = 0
+      n = 0
+      
+      DO i1=1,SIZE(v1)
+        DO i2=1,SIZE(v2)
+          IF( v1(i1) == v2(i2) ) THEN
+            n = n+1
+            vsame(n) = v1(i1)
+          END IF
+        END DO
+      END DO
+    END IF    
+          
+  END FUNCTION CountSameIntegers
+
+
+  
   !---------------------------------------------------------<
   !> Returns values from a normal distribution to be used in 
   !> thermal velocity distribution, for example.
@@ -2818,12 +2878,18 @@ CONTAINS
     ! We have a special relative pseunonorm that should be one!
     RelativeNorm = 0.0
     DO i=1,6
-      c = ThisResults(i)/RefResults(i)
-      RelativeNorm = RelativeNorm + MAX( c, 1.0_dp /c ) / 6
+      IF( ABS(RefResults(i) ) > EPSILON(c) ) THEN
+        c = ThisResults(i)/RefResults(i)
+        c = MAX( c, 1.0_dp /c ) 
+      ELSE
+        c = 1.0_dp + ABS(ThisResults(i))
+      END IF
+      RelativeNorm = RelativeNorm + c
     END DO
+    RelativeNorm = RelativeNorm / 6
     
   END FUNCTION AscBinCompareNorm
-  
+   
   
 END MODULE AscBinOutputUtils
 
