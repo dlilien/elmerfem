@@ -1,0 +1,202 @@
+Header
+  Mesh DB "." "square"
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Simulation
+  Coordinate System  = Cartesian 2D
+  Simulation Type = Transient
+
+  Timestepping Method = "bdf"
+  BDF Order = 1
+  Timestep Intervals(1) = 10
+  Timestep Sizes(1) = 0.02
+
+  Steady State Min Iterations = 1
+  Steady State Max Iterations = 10
+
+  max output level = 3
+
+  Initialize Dirichlet Conditions = Logical False
+End
+
+Constants
+   Gas Constant = Real 8.314
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Body Force
+Body Force 1
+  ! AIFlow Force 2 = Real -0.00899  ! body force, i.e. gravity * density
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Material
+Material 1
+!!!!! For AIFlows...
+  Powerlaw Exponent = Real 3.0         ! sqrt(tr(S^2/2))^n if AIFlow_nlS2 sqrt(tr(2D^2))^(1/n-1) if  AIFlow_nlD2
+  Min Second Invariant = Real 1.0e-10  ! Min value for the second invariant of strain-rates
+  Reference Temperature = Real -10.0   ! T0 (Celsius)!
+  Fluidity Parameter = Real 30.986    ! Bn(T0) to match what we used for inversion
+  Limit Temperature = Real -10.0        ! TL  (Celsius)!
+  Activation Energy 1 = Real 6.0e4     ! different from elmer/ice example to match Cuffey and Patterson
+  Activation Energy 2 = Real 1.39e5 
+  Viscosity = Real 1.0
+
+  Viscosity File = FILE "040010010.Va"
+
+  Isotropic = Logical False !If set to true Glen flow law (no need to defined Fabric)
+
+!!!! For Fabric Solver
+  Interaction Parameter = Real 0.0 ! 0=> Fabric Evolution function of Strain-rates 1=> Fabric Evolution function of dev stresses
+                                  !If not defined set to the default value given in Viscosity File
+  Diffusion Intercept = Real 1.e16   ! Diffusion term. By default set to 0 if not defined
+  Diffusion Parameter = Real 0.0   ! Diffusion term. By default set to 0 if not defined
+  Max Diffusion = Real 0.02
+  Migration Prefactor = Real 1.0e8
+  Migration A = Real 0.0
+
+  ! Migration Gamma = Real 0.1
+  Max Migration = Real 0.55
+
+  Lattice Rotation = Real 1.0
+
+  Spatial Fabric Diffusion = Real 1.0e-5
+
+  Temperature = Real -10.0
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Initial Condition
+Initial Condition 1
+  FabricR 1 = Real 0.28209478329945054 !a2_11
+  FabricR 2 = Real 0.0 !a2_22
+  FabricR 3 = Real 0.0               !a2_12
+  FabricR 4 = Real 0.0               !a2_23
+  FabricR 5 = Real 0.0               !a2_13
+  FabricR 6 = Real 0.0               !a2_12
+  FabricR 7 = Real 0.0               !a2_23
+  FabricR 8 = Real 0.0               !a2_13
+  FabricR 9 = Real 0.               !a2_12
+  FabricR 10 = Real 0.               !a2_23
+  FabricR 11 = Real 0.               !a2_13
+  FabricR 12 = Real 0.               !a2_13
+  FabricR 13 = Real 0.               !a2_13
+  FabricR 14 = Real 0.               !a2_13
+  FabricR 15 = Real 0.               !a2_13
+  FabricR 16 = Real 0.               !a2_23
+  FabricR 17 = Real 0.               !a2_13
+  FabricR 18 = Real 0.               !a2_13
+  FabricR 19 = Real 0.               !a2_13
+  FabricR 20 = Real 0.               !a2_23
+  FabricR 21 = Real 0.               !a2_13
+  FabricR 22 = Real 0.               !a2_13
+  FabricR 23 = Real 0.               !a2_13
+  FabricR 24 = Real 0.               !a2_13
+  FabricR 25 = Real 0.               !a2_13
+  FabricR 26 = Real 0.               !a2_23
+  FabricR 27 = Real 0.               !a2_13
+  FabricR 28 = Real 0.               !a2_13
+  FabricR 29 = Real 0.               !a2_13
+  FabricR 30 = Real 0.               !a2_23
+  FabricR 31 = Real 0.               !a2_13
+  FabricR 32 = Real 0.               !a2_13
+  FabricR 33 = Real 0.               !a2_13
+  FabricR 34 = Real 0.               !a2_13
+  FabricR 35 = Real 0.               !a2_13
+  FabricR 36 = Real 0.               !a2_23
+  FabricR 37 = Real 0.               !a2_13
+  FabricR 38 = Real 0.               !a2_13
+  FabricR 39 = Real 0.               !a2_13
+  FabricR 40 = Real 0.               !a2_23
+  FabricR 41 = Real 0.               !a2_13
+  FabricR 42 = Real 0.               !a2_13
+  FabricR 43 = Real 0.               !a2_13
+  FabricR 44 = Real 0.               !a2_13
+  FabricR 45 = Real 0.               !a2_13
+
+  AIFlow 1 = Variable Coordinate 1
+    Real MATC "tx * 1.0e-1"
+  AIFlow 2 = Variable Coordinate 2
+    Real MATC "(tx - 0.5) * -1.0e-1"
+  AIFlow 3 = Real 0.0
+
+  Temperature = Real -10.0
+End
+
+
+!%%%%%%%%%%%%%%%%%%%%%      Solvers
+Solver 1
+  Equation = AIFlow_Spectral
+  Variable = AIFlow
+  Variable DOFs = 3                        !3 for 2D -- 4 for 3D
+
+  Exported Variable 1 = Temperature        !Define Temperature Mandatory!!
+  Exported Variable 1 DOFS = Integer 1
+
+  Exported Variable 2 = FabricR            !Define Fabric Variable !!Mandatory if Isotropic=False
+  Exported Variable 2 DOFS = Integer 56
+
+  Exported Variable 3 =  StrainRate        ! Compute SR
+  Exported Variable 3 DOFS = Integer 4     !4 in 2D  6 in 3D (11,22,33,12,23,31)
+
+  Exported Variable 4 =  DeviatoricStress  ! Compute Stresses
+  Exported Variable 4 DOFS = Integer 4     !4 in 2D  6 in 3D  (11,22,33,12,23,31)
+
+  Exported Variable 5 =  Spin              ! Compute Spin
+  Exported Variable 5 DOFS = Integer 1     !1 in 2D  3 in 3D (12,23,31)
+
+  Exported Variable 6 = OOP            !Define Fabric Variable !!Mandatory if Isotropic=False
+  Exported Variable 6 DOFs = Integer 1
+
+  Exported Variable 7 = TensorFabric        !Define Temperature Mandatory!!
+  Exported Variable 7 DOFS = Integer 5
+
+  Exported Variable 8 = EffectiveViscosity
+  Exported Variable 8 DoFs = 1
+
+  Exported Variable 9 = EnhancementFactors
+  Exported Variable 9 DoFs = 36
+
+  Procedure = "ElmerIceSolvers" "AIFlowSolver_spectral"
+
+  LCap = Integer 6
+  Fabric Name = String fabricr
+  Temperature Variable = String temperature
+
+  Linear System Solver = Direct
+  Linear System Direct Method = umfpack
+
+! linear flow law (exponent=1) => no need for non lin iters.
+  Nonlinear System Max Iterations = 15
+  Nonlinear System Convergence Tolerance  = 1.0e-5
+  Nonlinear System Newton After Iterations = 15
+  Nonlinear System Newton After Tolerance = 1.0e-05
+  Nonlinear System Relaxation Factor = 1.00
+
+  Steady State Convergence Tolerance = Real 1.0e-4
+
+  Temperature Solution Name = String Temperature
+  Stabilize = Logical True
+  Bubbles = Logical True
+
+  ! Exec Solver = Before Simulation
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Equation 1
+  Active Solvers(1)= 1
+End
+
+!%%%%%%%%%%%%%%%%%%%%%      Boundary Condition
+Boundary Condition 1
+  Target Boundaries(2) = 1 3
+   Normal-Tangential AIFlow = Logical True
+  AIFlow 1 = Real -0.05
+End
+
+Boundary Condition 2
+  Target Boundaries(1) = 4
+    AIFlow 1 = Real 0.0
+End
+
+
+Solver 1 :: Reference Norm = Real 0.11401726
+Solver 1 :: Reference Norm Tolerance = Real 1E-06

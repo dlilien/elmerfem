@@ -11,22 +11,21 @@
 # if all listed variables are TRUE
 INCLUDE(${CMAKE_ROOT}/Modules/FindPackageHandleStandardArgs.cmake)
 
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-
-SET(SpecFab_FOUND FALSE)
-
-SET(SpecFabLIB 
+ 
+FIND_LIBRARY(SpecFab_LIBRARY specfab HINTS
   "${SpecFabROOT}"
-  "${SpecFab_LIBRARY_DIR}"
+  "${SpecFabLIB}"
   "$ENV{SpecFabROOT}"
-  INTERNAL)
-
-FIND_LIBRARY(SpecFab_LIBRARY specfab HINTS ${SpecFabLIB})
+  "$ENV{SpecFabLIB}"
+  )
 
 FIND_PATH(SpecFab_INCLUDE_DIR
   specfab.mod 
   HINTS 
-  ${SpecFabLIB}
+  "${SpecFabROOT}"
+  "${SpecFabINCLUDE}"
+  "$ENV{SpecFabROOT}"
+  "$ENV{SpecFabINCLUDE}"
   )
 
 IF (SpecFab_LIBRARY AND SpecFab_INCLUDE_DIR)

@@ -4,22 +4,6 @@ SET(WITH_ScatteredDataInterpolator FALSE CACHE BOOL "Include ElmerIce ScatteredD
 MARK_AS_ADVANCED(WITH_ScatteredDataInterpolator)
 
 # ---------------------- #
-FIND_PACKAGE(SpecFab)
-IF(SpecFab_FOUND)
-    SET(HAVE_SpecFab TRUE)
-  MARK_AS_ADVANCED(HAVE_SpecFab)
-  ADD_DEFINITIONS(-DHAVE_SpecFab)
-  INCLUDE_DIRECTORIES(${SpecFab_INCLUDE})
-  MESSAGE(STATUS "  SpecFab:           " "${SpecFab_FOUND}")
-  MESSAGE(STATUS "  SpecFab_LIBS:     " "${SpecFab_LIBRARIES}")
-  MESSAGE(STATUS "  SpecFab_INCLUDE:     " "${SpecFab_INCLUDE}")
-ELSE()
-  MESSAGE(STATUS "Library not found: >SpecFab_FOUND< ")
-  MESSAGE(WARNING "  \n Missing: >SpecFab_LIBRARY< \n some functionalities will be disabled")
-ENDIF(SpecFab_FOUND)
-
-
-# ---------------------- #
 # -- LOOK FOR MMG     -- #
 #----------------------- #
 IF(HAVE_MMG)

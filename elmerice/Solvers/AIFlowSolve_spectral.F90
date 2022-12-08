@@ -24,7 +24,7 @@
 ! *
 ! *  Authors of tensorial solver: Juha Ruokolainen, Fabien Gillet-Chaulet, Olivier Gagliardini
 ! *  Authors of spectral solver: David Lilien and Nicholas Rathmann
-! *  Email:   dlilien90@gmail.com
+! *  Email:   david.lilien@umanitoba.ca
 ! *  Web:     http://elmerice.elmerfem.org
 ! *
 ! *  Original Date: 13 October, 2021

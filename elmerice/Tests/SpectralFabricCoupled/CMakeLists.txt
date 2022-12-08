@@ -5,6 +5,6 @@ IF (HAVE_SpecFab)
 
     FILE(COPY ELMERSOLVER_STARTINFO square.grd DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/")
 
-    ADD_ELMERICE_TEST(SpectralFabric)
-    ADD_ELMERICE_LABEL(SpectralFabric elmerice-fast)
+    ADD_ELMERICE_TEST(SpectralFabricCoupled)
+    ADD_ELMERICE_LABEL(SpectralFabricCoupled slow)
 ENDIF()

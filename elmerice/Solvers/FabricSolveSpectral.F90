@@ -22,15 +22,15 @@
 ! *****************************************************************************/
 ! ******************************************************************************
 ! *
-! *  Authors:  David Lilien and Nicholas Rathmann modified from standard fabric by
-! *                Juha Ruokolainen, Olivier Gagliardini, Fabien Gillet-Chaulet
-! *  Email:   david.lilien@nbi.ku.dk and Juha.Ruokolainen@csc.fi
+! *  Authors:  David Lilien and Nicholas Rathmann modified from tensorial fabric
+! *            by Juha Ruokolainen, Olivier Gagliardini, Fabien Gillet-Chaulet
+! *  Email:   david.lilien@umanitoba.ca and Juha.Ruokolainen@csc.fi
 ! *  Web:     http://elmerice.elmerfem.org
 ! *  Address: CSC - IT Center for Science Ltd.
 ! *           Keilaranta 14
 ! *           02101 Espoo, Finland 
 ! *
-! *       Date of modification: 06/21
+! *       Date of modification: 12/22
 ! *
 ! *****************************************************************************/
 !>  Solver for fabric parameter equations 
