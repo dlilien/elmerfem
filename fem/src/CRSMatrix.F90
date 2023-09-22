@@ -295,21 +295,24 @@ CONTAINS
 !>    Fill in the column number to a CRS format matrix (values are not 
 !>    affected in any way).
 !------------------------------------------------------------------------------
-  SUBROUTINE CRS_MakeMatrixIndex( A,i,j )
+  SUBROUTINE CRS_MakeMatrixIndex( A,i,j,prev )
 !------------------------------------------------------------------------------
     TYPE(Matrix_t) :: A  !< Structure holding matrix
     INTEGER, INTENT(IN) :: i         !< row number of the matrix element
     INTEGER, INTENT(IN) :: j         !< column number of the matrix element
+    INTEGER, OPTIONAL :: prev
 !------------------------------------------------------------------------------
 
-    INTEGER :: k,n
+    INTEGER :: k,l,n
     INTEGER, POINTER :: Cols(:),Rows(:)
 
     Rows   => A % Rows
     Cols   => A % Cols
 
     n = Rows(i)
-    DO k=Rows(i),Rows(i+1)-1
+    l = Rows(i)
+    IF(PRESENT(prev)) l=prev+1
+    DO k=l,Rows(i+1)-1
       IF ( Cols(k) == j ) THEN
         RETURN
       ELSE IF ( Cols(k) < 1 ) THEN
@@ -325,6 +328,7 @@ CONTAINS
     END IF
 
     Cols(n) = j
+    IF(PRESENT(prev)) prev=n
   END SUBROUTINE CRS_MakeMatrixIndex
 !------------------------------------------------------------------------------
 
@@ -333,11 +337,12 @@ CONTAINS
 !------------------------------------------------------------------------------
 !>    Add a given value to an element of a  CRS format matrix.
 !------------------------------------------------------------------------------
-  SUBROUTINE CRS_AddToMatrixElement( A,i,j,val )
+  SUBROUTINE CRS_AddToMatrixElement( A,i,j,val,previ )
 !------------------------------------------------------------------------------
     TYPE(Matrix_t) :: A     !< Structure holding the matrix
     INTEGER, INTENT(IN) :: i         !< row number of the matrix element
     INTEGER, INTENT(IN) :: j         !< column number of the matrix element
+    INTEGER, INTENT(INOUT), OPTIONAL :: previ     !< speed sequential access
     REAL(KIND=dp), INTENT(IN) :: val   !< value to be added to the matrix element
  !------------------------------------------------------------------------------
     INTEGER :: k
@@ -358,16 +363,26 @@ CONTAINS
     Values => A % Values
 
     IF ( .NOT.ASSOCIATED(Diag) .OR. i /= j .OR. .NOT. A % Ordered ) THEN
-      k = CRS_Search( Rows(i+1)-Rows(i),Cols(Rows(i):Rows(i+1)-1),j )
-      IF ( k==0 .AND. val/=0 ) THEN
-        CALL Warn('CRS_AddToMatrixElement','Matrix element is to be added to a nonexistent position')
-        CALL Warn('CRS_AddToMatrixElement','Row: '//i2s(i)//' Col: '//i2s(j))
-        CALL Warn('CRS_AddToMatrixElement','Number of Matrix rows:'//i2s(A % NumberOfRows))
-        CALL Warn('CRS_AddToMatrixElement','Converting CRS to list')
-        A % FORMAT = MATRIX_LIST
+      IF(PRESENT(Previ)) THEN
+        k = previ+1
+        DO WHILE(k<Rows(i+1)-1)
+          IF(Cols(k)==j) EXIT
+          k = k+1 
+        END DO
+        previ = k
+        IF(Cols(k)/=j) RETURN
+      ELSE
+        k = CRS_Search( Rows(i+1)-Rows(i),Cols(Rows(i):Rows(i+1)-1),j )
+        IF ( k==0 .AND. val/=0 ) THEN
+          CALL Warn('CRS_AddToMatrixElement','Matrix element is to be added to a nonexistent position')
+          CALL Warn('CRS_AddToMatrixElement','Row: '//i2s(i)//' Col: '//i2s(j))
+          CALL Warn('CRS_AddToMatrixElement','Number of Matrix rows:'//i2s(A % NumberOfRows))
+          CALL Warn('CRS_AddToMatrixElement','Converting CRS to list')
+          A % FORMAT = MATRIX_LIST
+        END IF
+        IF ( k==0 ) RETURN
+        k = k + Rows(i) - 1
       END IF
-      IF ( k==0 ) RETURN
-      k = k + Rows(i) - 1
     ELSE
       k = Diag(i)
     END IF
@@ -436,7 +451,7 @@ CONTAINS
       END DO
     END DO
     
-    CALL Info('CSR_CheckSymmetricTopo','Number of symmetry misses:'//TRIM(I2S(ns)))
+    CALL Info('CSR_CheckSymmetricTopo','Number of symmetry misses:'//I2S(ns))
     
   END SUBROUTINE CRS_CheckSymmetricTopo
 !------------------------------------------------------------------------------
@@ -506,8 +521,8 @@ CONTAINS
       END DO
     END DO
     
-    CALL Info('CSR_CheckComplexTopo','Number of row misses:'//TRIM(I2S(nr)))
-    CALL Info('CSR_CheckComplexTopo','Number of col misses:'//TRIM(I2S(nc)))
+    CALL Info('CSR_CheckComplexTopo','Number of row misses:'//I2S(nr))
+    CALL Info('CSR_CheckComplexTopo','Number of col misses:'//I2S(nc))
     
   END SUBROUTINE CRS_CheckComplexTopo
 !------------------------------------------------------------------------------
@@ -1255,7 +1270,6 @@ CONTAINS
       
       DO l=A % Rows(n),A % Rows(n+1)-1
         i = A % Cols(l)
-        
         IF( A % ConstrainedDOF(i) ) THEN         
           b(n) = b(n) - A % Values(l) * A % DValues(i)
 
@@ -1364,7 +1378,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     LOGICAL :: SetRowSizes
 !------------------------------------------------------------------------------
 
-    CALL Info('CRS_CreateMatrix','Creating CRS Matrix of size: '//TRIM(I2S(n)),Level=12)
+    CALL Info('CRS_CreateMatrix','Creating CRS Matrix of size: '//I2S(n),Level=12)
 
     SetRowSizes = .TRUE.
     IF( PRESENT( SetRows ) ) SetRowSizes = SetRows
@@ -1374,22 +1388,22 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     ALLOCATE( A % Rows(n+1),A % Diag(n),STAT=istat )
     IF ( istat /= 0 ) THEN
       CALL Fatal( 'CRS_CreateMatrix', 'Memory allocation error for matrix topology of size: '&
-          //TRIM(I2S(n)))
+          //I2S(n))
     END IF
 
     k = Ndeg*Ndeg*Total
-    CALL Info('CRS_CreateMatrix','Creating CRS Matrix with nofs: '//TRIM(I2S(k)),Level=14)
+    CALL Info('CRS_CreateMatrix','Creating CRS Matrix with nofs: '//I2S(k),Level=14)
     ALLOCATE( A % Cols(k),STAT=istat )
     IF ( istat /= 0 ) THEN
       CALL Fatal( 'CRS_CreateMatrix', 'Memory allocation error for matrix cols of size: '&
-          //TRIM(I2S(k)) )
+          //I2S(k) )
     END IF
 
     IF ( AllocValues ) THEN
       ALLOCATE( A % Values(k), STAT=istat )
       IF ( istat /= 0 ) THEN
         CALL Fatal( 'CRS_CreateMatrix', 'Memory allocation error for matrix values of size: '&
-            //TRIM(I2S(k)) )
+            //I2S(k) )
       END IF
     END IF
 
@@ -2635,26 +2649,30 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 !>    Pics a block from matrix A to build matrix B. It is assumed that the 
 !> matrix is split into given number of equally sized blocks.
 !------------------------------------------------------------------------------
-  SUBROUTINE CRS_BlockMatrixPick(A,B,Blocks,Nrow,Ncol)
+  SUBROUTINE CRS_BlockMatrixPick(A,B,Blocks,Nrow,Ncol,PickPrec)
 !------------------------------------------------------------------------------
     TYPE(Matrix_t), INTENT(IN) :: A   !< Initial matrix
     TYPE(Matrix_t) :: B   !< Submatrix picked from the larger matrix
     INTEGER, INTENT(IN) :: Blocks     !< Number of blocks in the initial matrix
     INTEGER, INTENT(IN) :: Nrow       !< Row to be picked
     INTEGER, INTENT(IN) :: Ncol       !< Column to be picked
+    LOGICAL, INTENT(IN), OPTIONAL :: PickPrec
 !------------------------------------------------------------------------------    
-	INTEGER :: i,j,k,l,kb,n,Nrow0,Ncol0,nsub
+    INTEGER :: i,j,k,l,kb,n,Nrow0,Ncol0,nsub
     INTEGER :: lsub,isub,istat,modNcol
-    LOGICAL :: NewMatrix, Diagonal
+    LOGICAL :: NewMatrix, Diagonal, DoPrec
 
     IF(Blocks <= 1) THEN
       CALL Fatal('CRS_BlockMatrixPick','No applicable to just one block!')
       RETURN
     END IF
 
-    CALL Info('CRS_BlockMatrixPick','Picking block ('//TRIM(I2S(Nrow))//&
-        ','//TRIM(I2S(Ncol))//') from matrix',Level=10)
+    CALL Info('CRS_BlockMatrixPick','Picking block ('//I2S(Nrow)//&
+        ','//I2S(Ncol)//') from matrix',Level=10)
 
+    DoPrec = .FALSE.
+    IF(PRESENT(PickPrec)) DoPrec = PickPrec .AND. ASSOCIATED(A % PrecValues)
+    
     
     N = A % NumberOfRows
     Nsub = N / Blocks
@@ -2688,6 +2706,11 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 
       ALLOCATE(B % Rows(nsub+1),B % Cols(kb), B % Values(kb),STAT=istat )
       IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick','memory allocation error for matrix')
+
+      IF(DoPrec) THEN
+        ALLOCATE(B % PrecValues(kb),STAT=istat )
+        IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick','memory allocation error for precvalues')
+      END IF
     ELSE
       CALL Info('CRS_BlockMatrixPick','Using existing matrix structure',Level=12)
     END IF
@@ -2715,7 +2738,10 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
         l = A % Cols(k)
         IF( MOD( l, Blocks ) == modNcol ) THEN
           lsub = ( l - 1) / Blocks + 1
+
           B % Values(kb) = A % Values(k)
+          IF(DoPrec) B % PrecValues(kb) = A % PrecValues(k)
+          
           IF( NewMatrix ) THEN
             B % Cols(kb) = lsub
             IF( Diagonal .AND. isub == lsub ) B % Diag(isub) = kb
@@ -2757,8 +2783,8 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 
     blocks = SIZE( Splits ) + 1
     
-    CALL Info('CRS_PartMatrixPick','Picking block ('//TRIM(I2S(Nrow))//','//TRIM(I2S(Ncol))//&
-        ') part out of ('//TRIM(I2S(blocks))//','//TRIM(I2S(blocks))//')',Level=6)
+    CALL Info('CRS_PartMatrixPick','Picking block ('//I2S(Nrow)//','//I2S(Ncol)//&
+        ') part out of ('//I2S(blocks)//','//I2S(blocks)//')',Level=6)
 
     N = A % NumberOfRows
 
@@ -2766,23 +2792,23 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
       CALL Fatal('CRS_PartMatrixPick','No applicable to just one block!')
     END IF
     IF( Nrow > blocks .OR. Nrow < 1 ) THEN
-      CALL Fatal('CRS_PartMatrixPick','Invalid value for Nrow: '//TRIM(I2S(Nrow)))
+      CALL Fatal('CRS_PartMatrixPick','Invalid value for Nrow: '//I2S(Nrow))
     END IF
     IF( Ncol > blocks .OR. Ncol < 1) THEN
-      CALL Fatal('CRS_PartMatrixPick','Invalid value for Ncol: '//TRIM(I2S(Nrow)))
+      CALL Fatal('CRS_PartMatrixPick','Invalid value for Ncol: '//I2S(Nrow))
     END IF
 
     i = MINVAL( Splits ) 
     IF( i <= 0 ) THEN
-      CALL Fatal('CRS_PartMatrixPick','Split must be positive: '//TRIM(I2S(i)))
+      CALL Fatal('CRS_PartMatrixPick','Split must be positive: '//I2S(i))
     END IF
     i = MAXVAL( Splits ) 
     IF( i >= n ) THEN
-      CALL Fatal('CRS_PartMatrixPick','Split must be smaller than matrix size: '//TRIM(I2S(i)))
+      CALL Fatal('CRS_PartMatrixPick','Split must be smaller than matrix size: '//I2S(i))
     END IF
 
     kb0 = A % Rows(n+1) - 1
-    CALL Info('CRS_PartMatrixPick','Number of nonzeros in initial matrix: '//TRIM(I2S(kb0)),Level=7)
+    CALL Info('CRS_PartMatrixPick','Number of nonzeros in initial matrix: '//I2S(kb0),Level=7)
 
     IF( Nrow == 1 ) THEN
       n1 = 1 
@@ -2796,7 +2822,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     END IF
     nsub = n2 - n1 + 1
     CALL Info('CRS_PartMatrixPick',&
-        'Picking rows from '//TRIM(I2S(n1))//' to '//TRIM(I2S(n2)),Level=7)
+        'Picking rows from '//I2S(n1)//' to '//I2S(n2),Level=7)
     
     IF( Ncol == 1 ) THEN
       m1 = 1 
@@ -2810,10 +2836,10 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     END IF   
     msub = m2 - m1 + 1
     CALL Info('CRS_PartMatrixPick',&
-        'Picking columns from '//TRIM(I2S(m1))//' to '//TRIM(I2S(m2)),Level=7)
+        'Picking columns from '//I2S(m1)//' to '//I2S(m2),Level=7)
 
     CALL Info('CRS_PartMatrixPick',&
-        'Sizes of submatrix is '//TRIM(I2S(nsub))//' x '//TRIM(I2S(msub)),Level=7)
+        'Sizes of submatrix is '//I2S(nsub)//' x '//I2S(msub),Level=7)
 
 
     NewMatrix = ( B % NumberOfRows == 0 ) 
@@ -2840,7 +2866,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
         RETURN
       END IF
 
-      CALL Info('CRS_PartMatrixPick','Number of nonzeros in submatrix: '//TRIM(I2S(kb)))
+      CALL Info('CRS_PartMatrixPick','Number of nonzeros in submatrix: '//I2S(kb))
 
       ALLOCATE(B % Rows(nsub+1),B % Cols(kb), B % Values(kb),STAT=istat )
       IF( istat /= 0 ) CALL Fatal('CRS_PartMatrixPick','memory allocation error 1')
@@ -2896,17 +2922,18 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
 !> This subroutine enables the use of 
 !> nontrivial block decompositions. 
 !------------------------------------------------------------------------------
-  SUBROUTINE CRS_BlockMatrixPick2(A,B,BlockStruct,Nrow,Ncol)
+  SUBROUTINE CRS_BlockMatrixPick2(A,B,BlockStruct,Nrow,Ncol,PickPrec)
 !------------------------------------------------------------------------------
     TYPE(Matrix_t), INTENT(IN) :: A   !< Initial matrix
     TYPE(Matrix_t) :: B   !< Submatrix picked from the larger matrix
     INTEGER, POINTER :: BlockStruct(:)     !< Block decomposition structure of the initial matrix
     INTEGER, INTENT(IN) :: Nrow       !< Row to be picked
     INTEGER, INTENT(IN) :: Ncol       !< Column to be picked
+    LOGICAL, INTENT(IN), OPTIONAL :: PickPrec
 !------------------------------------------------------------------------------
     INTEGER :: i,j,k,l,kb,n,Nrow0,Ncol0,nsub,Mrow,Mcol,mr,mc,imsub,lmsub
     INTEGER :: lsub,isub,istat,modNcol,Blocks
-    LOGICAL :: NewMatrix, Allocated, Diagonal, Hit
+    LOGICAL :: NewMatrix, Allocated, Diagonal, Hit, DoPrec
     INTEGER, ALLOCATABLE :: Irow(:), Icol(:)
     
     Blocks = SIZE( BlockStruct )
@@ -2916,6 +2943,9 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
       RETURN
     END IF
 
+    DoPrec = .FALSE.
+    IF(PRESENT(PickPrec)) DoPrec = PickPrec .AND. ASSOCIATED(A % PrecValues)
+    
     N = A % NumberOfRows
 
     Mrow = 0
@@ -2976,7 +3006,10 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
           IF( Hit ) THEN
             IF( Allocated ) THEN
               lmsub = Mcol * ( ( l - 1) / Blocks ) + mc
+
               B % Values(kb) = A % Values(k)
+              IF(DoPrec) B % PrecValues(kb) = A % PrecValues(k)
+
               IF( NewMatrix ) THEN
                 B % Cols(kb) = lmsub
                 IF( Diagonal ) THEN
@@ -3008,6 +3041,12 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
         IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick2','memory allocation error 2')      
       END IF
 
+      IF(DoPrec) THEN
+        ALLOCATE(B % PrecValues(kb-1),STAT=istat )
+        IF( istat /= 0 ) CALL Fatal('CRS_BlockMatrixPick2','memory allocation error 3')
+      END IF
+      
+      
       IF( A % COMPLEX ) THEN
         IF( MOD( Mrow, 2) == 0 .AND. MOD( Mcol, 2) == 0 ) THEN
           B % COMPLEX = .TRUE.
@@ -3255,7 +3294,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     END IF
 
     CALL Info('CRS_CreateChildMatrix','Created matrix with rows: '&
-        //TRIM(I2S( ChildMat % NumberOfRows)),Level=10 )
+        //I2S( ChildMat % NumberOfRows),Level=10 )
 
 
   END SUBROUTINE CRS_CreateChildMatrix
@@ -3564,7 +3603,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
          END DO
       END DO
 
-      CALL Info('CRS_IncompleteLU','Number of nonzeros: '//TRIM(I2S(NonZeros)),Level=12)
+      CALL Info('CRS_IncompleteLU','Number of nonzeros: '//I2S(NonZeros),Level=12)
 
 !------------------------------------------------------------------------------
 
@@ -4989,7 +5028,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
     Rows(i) = k2+1
 
     CALL Info('CRS_PackMatrix','Number of summed-up matrix entries: '&
-        //TRIM(I2S(nofs0-k2)),Level=8)
+        //I2S(nofs0-k2),Level=8)
 
   END SUBROUTINE CRS_PackMatrix
 !------------------------------------------------------------------------------
@@ -5021,7 +5060,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
         DEALLOCATE(Cols0,Rows0)
       END IF
       n0 = SIZE(A % Cols)
-      CALL Info('CRS_ChangeTopology','Original matrix non-zeros: '//TRIM(I2S(n0)),Level=12)
+      CALL Info('CRS_ChangeTopology','Original matrix non-zeros: '//I2S(n0),Level=12)
       
       ALLOCATE( Cols0(n0), Rows0( SIZE( A % Rows ) ) )
       Cols0 = A % Cols
@@ -5043,7 +5082,7 @@ SUBROUTINE CRS_RowSumInfo( A, Values )
         CALL Fatal('CRS_ChangeTopology','This routine assumes constant number of rows!')
       END IF
       
-      CALL Info('CRS_ChangeTopology','New matrix non-zeros: '//TRIM(I2S(n)),Level=12)
+      CALL Info('CRS_ChangeTopology','New matrix non-zeros: '//I2S(n),Level=12)
       
       DO ivec=1,3
         NULLIFY(Aold)

@@ -62,11 +62,20 @@ SUBROUTINE FilmFlowSolver_init0( Model,Solver,dt,Transient)
   REAL(KIND=dp) :: dt
   LOGICAL :: Transient
   !------------------------------------------------------------------------------
+  LOGICAL :: Found, Serendipity
   TYPE(ValueList_t), POINTER :: Params 
   Params => GetSolverParams()
+
+  Serendipity = GetLogical( GetSimulation(), 'Serendipity P Elements', Found)
+  IF(.NOT.Found) Serendipity = .TRUE.
   
-  CALL ListAddNewString(Params,'Element', &
-      'p:1 -line b:1 -tri b:1 -tetra b:1 -quad b:3 -brick b:4 -prism b:4 -pyramid b:4')
+  IF(Serendipity) THEN
+    CALL ListAddNewString(Params,'Element', &
+        'p:1 -line b:1 -tri b:1 -tetra b:1 -quad b:3 -brick b:4 -prism b:4 -pyramid b:4')
+  ELSE
+    CALL ListAddNewString(Params,'Element', &
+        'p:1 -line b:1 -tri b:1 -tetra b:1 -quad b:4 -brick b:8 -prism b:4 -pyramid b:4')
+  END IF
 !------------------------------------------------------------------------------
 END SUBROUTINE FilmFlowSolver_Init0
 !------------------------------------------------------------------------------
@@ -101,7 +110,7 @@ SUBROUTINE FilmFlowSolver_init(Model, Solver, dt, Transient)
     CALL ListAddNewString(Params, 'Variable', &
         'Flow[FilmSpeed:1 FilmPressure:1]')
   ELSE
-    CALL Fatal(Caller,'This module does not make sense in dim: '//TRIM(I2S(mdim)))    
+    CALL Fatal(Caller,'This module does not make sense in dim: '//I2S(mdim))    
   END IF
 
   ! Study only velocity components in linear system
@@ -142,6 +151,8 @@ SUBROUTINE FilmFlowSolver( Model,Solver,dt,Transient)
       PseudoPressure(:)  
   LOGICAL :: GradP, LateralStrain, GotAc, SurfAc
   TYPE(Variable_t), POINTER :: pVar
+  INTEGER :: GapDirection
+  REAL(KIND=dp) :: GapFactor
   CHARACTER(*), PARAMETER :: Caller = 'FilmFlowSolver'
  
   SAVE STIFF, MASS, LOAD, FORCE, rho, ac, gap, mu, NormalVelo, Pres, Velocity, &
@@ -165,6 +176,15 @@ SUBROUTINE FilmFlowSolver( Model,Solver,dt,Transient)
   IF(.NOT. Found) mingap = TINY(mingap)
   GotAC = ListCheckPresentAnyMaterial( Model,'Artificial Compressibility')
 
+  GapDirection = 0
+  GapFactor = ListGetCReal( Params,'Gap Addition Factor',Found )
+  IF( Found ) THEN  
+    GapDirection = mdim+1
+    IF( ABS( GapFactor ) > 1.0_dp ) THEN
+      CALL Warn(Caller,'"Gap Addition Factor" greater to unity does not make sense!')
+    END IF
+  END IF
+    
   CSymmetry = ListGetLogical( Params,'Axi Symmetric',Found )
   IF(.NOT. Found ) THEN 
     CSymmetry = ( CurrentCoordinateSystem() == AxisSymmetric .OR. &
@@ -174,8 +194,8 @@ SUBROUTINE FilmFlowSolver( Model,Solver,dt,Transient)
   !Allocate some permanent storage, this is done first time only:
   !--------------------------------------------------------------
   IF ( .NOT. AllocationsDone ) THEN
-    CALL Info(Caller,'Dimension of Navier-Stokes equation: '//TRIM(I2S(mdim)))
-    CALL Info(Caller,'Dimension of coordinate system: '//TRIM(I2S(dim)))
+    CALL Info(Caller,'Dimension of Navier-Stokes equation: '//I2S(mdim))
+    CALL Info(Caller,'Dimension of coordinate system: '//I2S(dim))
 
     n = (mdim+1)*(Mesh % MaxElementDOFs+BDOFs)  ! just big enough for elemental arrays
     ALLOCATE( FORCE(n), LOAD(n,4), STIFF(n,n), MASS(n,n), &
@@ -298,7 +318,7 @@ SUBROUTINE FilmFlowSolver( Model,Solver,dt,Transient)
       END WHERE
 
       DO i=1,mdim
-        Load(i,1:n) = GetReal( BC, 'Pressure '//TRIM(I2S(i)), Found ) 
+        Load(i,1:n) = GetReal( BC, 'Pressure '//I2S(i), Found ) 
       END DO
       Load(mdim+1,1:n) = GetReal( BC, 'Mass Flux', Found )
       
@@ -350,6 +370,21 @@ CONTAINS
     SAVE Nodes
 !------------------------------------------------------------------------------
     CALL GetElementNodes( Nodes )
+
+    IF( GapDirection > 0 ) THEN
+      SELECT CASE( GapDirection )
+      CASE(1)
+        Nodes % x(1:n) = Nodes % x(1:n) + GapFactor * NodalGap(1:n)
+      CASE(2)
+        Nodes % y(1:n) = Nodes % y(1:n) + GapFactor * NodalGap(1:n)
+      CASE(3)
+        Nodes % z(1:n) = Nodes % z(1:n) + GapFactor * NodalGap(1:n)
+      END SELECT
+      ! Does this have an effect?
+      !PRINT *,'GapFactor:',GapFactor * NodalGap(1:n)
+    END IF
+
+
     STIFF = 0.0d0
     MASS  = 0.0d0
     FORCE = 0.0d0

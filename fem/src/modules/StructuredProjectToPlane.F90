@@ -174,7 +174,7 @@ SUBROUTINE StructuredProjectToPlane( Model,Solver,dt,Transient )
       ALLOCATE( TopField( TopNodes ) ) 
       TopField = 0.0_dp
     END IF
-    CALL Info(Caller,'Number of top nodes: '//TRIM(I2S(TopNodes)),Level=10)
+    CALL Info(Caller,'Number of top nodes: '//I2S(TopNodes),Level=10)
 
     BotNodes = 0
     ALLOCATE( BotPerm( Mesh % NumberOfNodes ) )
@@ -190,7 +190,7 @@ SUBROUTINE StructuredProjectToPlane( Model,Solver,dt,Transient )
         BotPerm(i) = BotNodes
       END IF
     END DO
-    CALL Info(Caller,'Number of bot nodes: '//TRIM(I2S(BotNodes)),Level=10)
+    CALL Info(Caller,'Number of bot nodes: '//I2S(BotNodes),Level=10)
 
     IF( MidLayerExists ) THEN
       MidNodes = 0
@@ -207,7 +207,7 @@ SUBROUTINE StructuredProjectToPlane( Model,Solver,dt,Transient )
           MidPerm(i) = MidNodes
         END IF
       END DO
-      CALL Info(Caller,'Number of mid nodes: '//TRIM(I2S(MidNodes)),Level=10)
+      CALL Info(Caller,'Number of mid nodes: '//I2S(MidNodes),Level=10)
     END IF
   END IF
   at0 = CPUTime()
@@ -660,10 +660,10 @@ SUBROUTINE StructuredProjectToPlane( Model,Solver,dt,Transient )
           END IF
         END DO
         
-      CASE ('int')
-        TopField = 0.0_dp
-        DO i=1,nnodes
+      CASE ('int','int mean')
 
+        TopField = 0.0_dp
+        DO i=1,nnodes                   
           j = i
           IF( MaskExist ) THEN
             j = MaskPerm(i)
@@ -676,6 +676,13 @@ SUBROUTINE StructuredProjectToPlane( Model,Solver,dt,Transient )
             IF( Coord(j) > Coord(MidPointer(j) ) ) CYCLE
           END IF
 
+          IF( Oper == 'int mean' ) THEN
+            height = ABS(Coord(TopPointer(j)) - Coord(BotPointer(j)))
+          ELSE
+            height = 1.0_dp
+          END IF
+          
+          
           ! Note for top and bottom this will automatically reduce the distance to half
           !----------------------------------------------------------------------------
           IF( i == TmpTopPointer(j) ) THEN
@@ -695,7 +702,7 @@ SUBROUTINE StructuredProjectToPlane( Model,Solver,dt,Transient )
           ELSE
             dx = 0.5*(Coord(iup) - Coord(idown))
           END IF
-          dx = ABS( dx )
+          dx = ABS( dx ) / height 
           k = i
           IF(ASSOCIATED(PermIn)) k = PermIn(k) 
             
@@ -703,6 +710,7 @@ SUBROUTINE StructuredProjectToPlane( Model,Solver,dt,Transient )
           itop = TopPointer(j)
           TopField(TopPerm(itop)) = TopField(TopPerm(itop)) + dx * FieldIn(k)
         END DO
+
         
       CASE ('thickness')
         TopField = 0.0_dp

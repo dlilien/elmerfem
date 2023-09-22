@@ -90,7 +90,7 @@ SUBROUTINE StressSolver_Init( Model,Solver,dt,Transient )
     SolverParams => GetSolverParams()
 
     dim = CoordinateSystemDimension()   
-    CALL ListAddNewString( SolverParams, 'Variable', '-dofs '//TRIM(I2S(dim))//' Displacement' )
+    CALL ListAddNewString( SolverParams, 'Variable', '-dofs '//I2S(dim)//' Displacement' )
 
     MaxwellMaterial = ListGetLogicalAnyMaterial(Model, 'Maxwell material')
     IF (.NOT.MaxwellMaterial) THEN
@@ -109,7 +109,7 @@ SUBROUTINE StressSolver_Init( Model,Solver,dt,Transient )
 
       CALL ListAddString( SolverParams, &
           NextFreeKeyword('Exported Variable ',SolverParams), &
-          '-dofs '//TRIM(i2s(dim**2))//' -ip ve_stress' )
+          '-dofs '//i2s(dim**2)//' -ip ve_stress' )
 
       i = GetInteger( SolverParams, 'Nonlinear System Min Iterations', Found )
       CALL ListAddInteger( SolverParams, 'Nonlinear System Min Iterations', MAX(i,2) )
@@ -185,7 +185,7 @@ SUBROUTINE StressSolver_Init( Model,Solver,dt,Transient )
     IF (CalcVelocities) THEN
       CALL ListAddString( SolverParams,&
             NextFreeKeyword('Exported Variable ',SolverParams), &
-            '-dofs '//TRIM(I2S(dim))//' Displacement Velocity')
+            '-dofs '//I2S(dim)//' Displacement Velocity')
     END IF
     
     CALL ListAddLogical( SolverParams, 'stress: Linear System Save', .FALSE. )
@@ -667,7 +667,7 @@ SUBROUTINE StressSolver_Init( Model,Solver,dt,Transient )
        at0 = RealTime()
 
        IF( MaxIter > 1 ) THEN
-         CALL Info( 'StressSolve','Displacement iteration: '//TRIM(I2S(iter)),Level=4)
+         CALL Info( 'StressSolve','Displacement iteration: '//I2S(iter),Level=4)
        END IF
        CALL Info( 'StressSolve', 'Starting assembly...',Level=5 )
 !------------------------------------------------------------------------------
@@ -1440,8 +1440,8 @@ CONTAINS
 
             DO i=1,dim
               DO j=1,dim
-                IF (ListCheckPresent(BC,'Spring '//TRIM(i2s(i))//i2s(j) )) &
-                  SpringCoeff(1:n,i,j)=GetReal( BC, 'Spring '//TRIM(i2s(i))//i2s(j), Found)
+                IF (ListCheckPresent(BC,'Spring '//i2s(i)//i2s(j) )) &
+                  SpringCoeff(1:n,i,j)=GetReal( BC, 'Spring '//i2s(i)//i2s(j), Found)
               END DO
             END DO
           END IF
@@ -1509,7 +1509,7 @@ CONTAINS
      INTEGER :: i,j,k,l,n
      REAL(KIND=dp) :: FORCE(1)
      REAL(KIND=dp), POINTER :: SaveValues(:) => NULL()
-     REAL(KIND=dp), ALLOCATABLE :: STIFF(:,:),MASS(:,:),DAMP(:,:),X(:),V(:),A(:)
+     REAL(KIND=dp), ALLOCATABLE :: STIFF(:,:),MASS(:,:),DAMP(:,:),X(:),V(:),A(:), A2(:)
      SAVE STIFF, MASS, DAMP, X, V, A
 
      IF ( .NOT.ASSOCIATED(Solver % Variable % Values, SaveValues) ) THEN
@@ -1519,7 +1519,7 @@ CONTAINS
         DO i=1,Solver % Matrix % NumberOfRows
           n = MAX( n,Solver % Matrix % Rows(i+1)-Solver % Matrix % Rows(i) )
         END DO
-        ALLOCATE( STIFF(1,n),MASS(1,n),DAMP(1,n),V(n),X(n),A(n) )
+        ALLOCATE( STIFF(1,n),MASS(1,n),DAMP(1,n),V(n),X(n),A(n),A2(n) )
 
         SaveValues => Solver % Variable % Values
      END IF
@@ -1535,10 +1535,11 @@ CONTAINS
          X(n) = Solver % Variable % PrevValues(Solver % Matrix % Cols(j),3)
          V(n) = Solver % Variable % PrevValues(Solver % Matrix % Cols(j),4)
          A(n) = Solver % Variable % PrevValues(Solver % Matrix % Cols(j),5)
+         A2(n) = Solver % Variable % PrevValues(Solver % Matrix % Cols(j),7)
        END DO
        FORCE(1) = Solver % Matrix % RHS(i)
        Solver % Matrix % Force(i,1) = FORCE(1)
-       CALL Bossak2ndOrder( n,dt,MASS,DAMP,STIFF,FORCE,X,V,A,Solver % Alpha )
+       CALL Time2ndOrder( n,dt,MASS,DAMP,STIFF,FORCE,X,V,A,A2,Solver % Alpha, Solver % Beta )
        n = 0
        DO j=Solver % Matrix % Rows(i),Solver % Matrix % Rows(i+1)-1
          n = n + 1

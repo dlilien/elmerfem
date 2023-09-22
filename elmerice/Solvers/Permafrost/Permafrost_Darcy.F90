@@ -240,13 +240,13 @@ SUBROUTINE PermafrostGroundwaterFlow( Model,Solver,dt,TransientSimulation )
   !--------------------------------------------------------------
   IF (FirstTime) THEN
     DO I=1,DIM
-      DummyGWfluxVar => VariableGet( Solver % Mesh % Variables, 'Groundwater Flux '//TRIM(I2S(i)))
+      DummyGWfluxVar => VariableGet( Solver % Mesh % Variables, 'Groundwater Flux '//I2S(i))
       FluxOutput = ASSOCIATED(DummyGWfluxVar)
       IF (.NOT.FluxOutput) EXIT
     END DO
     IF (FluxOutput) THEN
       CALL INFO(SolverName,'Groundwater flow will be written to: Groundwater Flux {1..'&
-          //TRIM(I2S(DIM))//'}',Level=4)
+          //I2S(DIM)//'}',Level=4)
     END IF
   END IF
   
@@ -371,7 +371,7 @@ SUBROUTINE PermafrostGroundwaterFlow( Model,Solver,dt,TransientSimulation )
       CALL MakePermUsingMask( Model, Solver, Solver % Mesh,'Salinity',.FALSE.,&
           BCFluxPerm, BCFluxNodes )
       CALL Info(SolverName,'Creating variable for boundary flux of size: '&
-          //TRIM(I2S(BCFluxNodes)),Level=12)
+          //I2S(BCFluxNodes),Level=12)
       CALL VariableAddVector( Solver % Mesh % Variables,Solver % Mesh,Solver,&
           'BC Flux', DummyGWFluxVar % DOFs, Perm = BCFluxPerm )
     END IF
@@ -529,9 +529,9 @@ CONTAINS
     IP = GaussPointsAdapt( Element )   
     IF( Element % ElementIndex == 1 ) THEN
       CALL INFO(SolverName,'Number of Gauss points for 1st element:'&
-          //TRIM(I2S(IP % n)),Level=31)
-      CALL Info(SolverName,'Elemental n:'//TRIM(I2S(n))//' nd:'&
-          //TRIM(I2S(nd))//' nd:'//TRIM(I2S(nb)),Level=31)
+          //I2S(IP % n),Level=31)
+      CALL Info(SolverName,'Elemental n:'//I2S(n)//' nd:'&
+          //I2S(nd)//' nd:'//I2S(nb),Level=31)
     END IF
 
     
@@ -895,7 +895,7 @@ CONTAINS
     REAL(KIND=dp) :: PressureAtIP, PorosityAtIP, SalinityAtIP, TemperatureAtIP, NormalAtIP(3)
     !REAL(KIND=dp), POINTER :: Nvector(:)
     LOGICAL :: Stat,Found,FluxCondition,WeakDirichletCond,ConstVal,ConstantsRead,Recharge
-    INTEGER :: i,t,p,q,dim,body_id, other_body_id, material_id, RockMaterialID
+    INTEGER :: i,t,p,q,DIM,body_id, other_body_id, material_id, RockMaterialID
     INTEGER, POINTER :: NodeIndexes(:)!, NPerm(:)
     TYPE(GaussIntegrationPoints_t) :: IP
     TYPE(ValueList_t), POINTER :: BoundaryCondition, ParentMaterial
@@ -925,27 +925,40 @@ CONTAINS
     WeakDirichletCond = .FALSE.
 
     WeakPressure(1:n) = GetReal( BoundaryCondition,'Imposed '// TRIM(VarName), WeakDirichletCond)
-   
-    IF (WeakDirichletCond) THEN
-      CALL INFO(FunctionName,'Setting weak condition (ignoring recharge and flux)',Level=12)
-    ELSE
-      FluxCondition = .TRUE.
-    END IF
-    
+
     IF(.NOT.ConstantsRead) THEN
       ConstantsRead = &
            ReadPermafrostConstants(Model, FunctionName, DIM, GasConstant, N0, DeltaT, T0, p0, eps, Gravity)
       !PRINT *, "BCSolute: (Constantsread) ", GasConstant, N0, DeltaT, T0, p0, eps, Gravity, ConstantsRead
     END IF
+    
+    IF (WeakDirichletCond) THEN
+      CALL INFO(FunctionName,'Setting weak condition (ignoring recharge and flux)',Level=12)
+    ELSE IF (GetElementFamily(Element) < DIM) THEN      
+      FluxCondition = .FALSE.
+    ELSE
+      FluxCondition = .TRUE.
+    END IF
+    
+    !PRINT *,FluxCondition
 
     IF (FluxCondition) THEN
-      body_id = GetInteger(BoundaryCondition,'Permafrost Target Body', Found)   
+      body_id = GetInteger(BoundaryCondition,'Permafrost Target Body', Found)
+
       ! inquire parent element and material
       IF (Found) THEN
         ParentElement => Element % BoundaryInfo % Right
-        IF (body_id .NE. ParentElement % BodyId) THEN
+        IF(ASSOCIATED(ParentElement) ) THEN
+          IF ( (body_id /= ParentElement % BodyId) ) ParentElement => NULL()
+        END IF
+        IF(.NOT. ASSOCIATED(ParentElement) ) THEN
           ParentElement => Element % BoundaryInfo % Left
-        END IF                
+          IF( ASSOCIATED(ParentElement)) THEN
+            IF ( (body_id /= ParentElement % BodyId) ) CALL FATAL(FunctionName, "Could not find parent element body")
+          ELSE
+            RETURN
+          END IF
+        END IF
       ELSE    
         other_body_id = Element % BoundaryInfo % outbody      
         IF (other_body_id < 1) THEN ! only one body in calculation
@@ -978,8 +991,10 @@ CONTAINS
         !RockMaterialID = ListGetInteger(ParentMaterial,'Rock Material ID', Found,UnfoundFatal=.TRUE.)
         RockMaterialID = ListGetInteger(Material,'Rock Material ID', Found)
         IF (.NOT.Found) THEN
-          PRINT *,'ParentElement % ElementIndex',ParentElement % ElementIndex
-          PRINT *,"Rock Material ID",RockMaterialID
+          WRITE (Message,*) 'ParentElement % ElementIndex',ParentElement % ElementIndex
+          CALL FATAL(FunctionName, Message)
+          !PRINT *,"Rock Material ID",RockMaterialID
+          !STOP
         END IF
       END IF
 
@@ -1003,7 +1018,7 @@ CONTAINS
 
     ! Numerical integration:
     !-----------------------
-    !IF (FluxCondition .OR. WeakDirichletCond) THEN ! spare us, if natural BC
+    IF (FluxCondition .OR. WeakDirichletCond) THEN ! spare us, if natural BC
       IP = GaussPoints( Element )
       DO t=1,IP % n
         ! Basis function values & derivatives at the integration point:
@@ -1052,7 +1067,7 @@ CONTAINS
         END IF
       END DO
       CALL DefaultUpdateEquations(STIFF,FORCE)
-    !END IF
+    END IF
     !------------------------------------------------------------------------------
   END SUBROUTINE LocalMatrixBCDarcy
   !------------------------------------------------------------------------------

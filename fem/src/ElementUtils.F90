@@ -152,7 +152,7 @@ CONTAINS
 
      IF(ASSOCIATED(Matrix % ParallelInfo)) THEN
        DEALLOCATE(Matrix % ParallelInfo % GlobalDOFs)
-       DEALLOCATE(Matrix % ParallelInfo % NodeInterface)
+       DEALLOCATE(Matrix % ParallelInfo % GInterface)
        DO i=1,SIZE(Matrix % ParallelInfo % NeighbourList)
          DEALLOCATE(Matrix % ParallelInfo % NeighbourList(i) % Neighbours)
        END DO
@@ -310,7 +310,7 @@ CONTAINS
     TYPE(ListMatrixEntry_t), POINTER :: CList, Lptr
     TYPE(Matrix_t),POINTER :: PMatrix
     TYPE(Element_t), POINTER :: Element,Elm, Edge1, Edge2, Face1, Face2, Left, Right
-    CHARACTER(LEN=MAX_NAME_LEN) :: RadiationFlag
+    CHARACTER(:), ALLOCATABLE :: RadiationFlag
     LOGICAL :: GotIt, PSA
     CHARACTER(*), PARAMETER :: Caller = 'MakeListMatrix'
 !------------------------------------------------------------------------------
@@ -631,8 +631,6 @@ CONTAINS
     !     Diffuse gray radiation condition:
     !     ---------------------------------
     Radiation = ListGetLogical( Solver % Values, 'Radiation Solver', Found )
-    IF ( .NOT. Found .AND. PRESENT(Equation) ) &
-        Radiation = Radiation .OR. (Equation == 'heat equation')
     IF( Radiation ) THEN        
       Radiation = .FALSE.
       DO i=1,Model % NumberOfBCs
@@ -666,7 +664,7 @@ CONTAINS
           Element => Mesh % Elements(i)
 
           IF( .NOT. ASSOCIATED( Element % BoundaryInfo ) ) CYCLE
-          IF ( .NOT. ASSOCIATED(Element % BoundaryInfo % GebhardtFactors) ) CYCLE
+          IF ( .NOT. ASSOCIATED(Element % BoundaryInfo % RadiationFactors) ) CYCLE
           
           n = Element % Type % NumberOfNodes
           maxnodes = MAX( n, maxnodes )
@@ -680,16 +678,16 @@ CONTAINS
           Element => Mesh % Elements(i)
 
           IF( .NOT. ASSOCIATED( Element % BoundaryInfo ) ) CYCLE
-          IF ( .NOT. ASSOCIATED(Element % BoundaryInfo % GebhardtFactors) ) CYCLE
+          IF ( .NOT. ASSOCIATED(Element % BoundaryInfo % RadiationFactors) ) CYCLE
 
           NumberOfFactors = Element % BoundaryInfo % &
-              GebhardtFactors % NumberOfImplicitFactors
+              RadiationFactors % NumberOfImplicitFactors
           IF(NumberOfFactors == 0 ) CYCLE
           
           n = Element % Type % NumberOfNodes
           
           IF( DgSolver ) THEN
-            CALL DgRadiationIndexes(Element,n,ElemInds)
+            CALL DgRadiationIndexes(Element,n,ElemInds,.TRUE.)
           END IF
             
           DO j=1,Element % TYPE % NumberOfNodes
@@ -712,10 +710,10 @@ CONTAINS
             DO n=1,NumberOfFactors
 
               Elm => Mesh % Elements( Element % BoundaryInfo % &
-                  GebhardtFactors % Elements(n) )
+                  RadiationFactors % Elements(n) )
 
               IF( DgSolver ) THEN
-                CALL DgRadiationIndexes(Elm,Elm % Type % NumberOfNodes,ElemInds2)
+                CALL DgRadiationIndexes(Elm,Elm % TYPE % NumberOfNodes,ElemInds2,.TRUE.)
               END IF
               
               DO k=1,Elm % TYPE % NumberOfNodes
@@ -765,7 +763,7 @@ CONTAINS
             IndexSize = n
             IF ( ALLOCATED( Indexes ) ) DEALLOCATE( Indexes )
             ALLOCATE( Indexes(n), STAT=istat )
-            IF( istat /= 0 ) CALL Fatal(Caller,'Allocation error for Indexes of size: '//TRIM(I2S(n)))
+            IF( istat /= 0 ) CALL Fatal(Caller,'Allocation error for Indexes of size: '//I2S(n))
          END IF
 
          n = 0
@@ -895,7 +893,7 @@ CONTAINS
           IF( ListGetLogical( Model % BCs(This) % Values,&
               'Periodic BC Use Lagrange Coefficient',Found)) CYCLE
 
-          CALL Info(Caller,'Adding matrix topology for BC: '//TRIM(I2S(This)),Level=10)
+          CALL Info(Caller,'Adding matrix topology for BC: '//I2S(This),Level=10)
 
           DO i=1,Projector % NumberOfRows
             k = Reorder( Projector % InvPerm(i) )
@@ -979,10 +977,9 @@ CONTAINS
 
     END SUBROUTINE PackSortAdd
         
-    
-    ! Pick thet correct indexes for radition when using discontinuous Galerkin.
-    ! In internal BCs we expect to find 'emissivity' given on either side.
-    !--------------------------------------------------------------------------
+
+
+#if 0    
     SUBROUTINE DgRadiationIndexes(Element,n,ElemInds)
 
       TYPE(Element_t), POINTER :: Element
@@ -1031,10 +1028,78 @@ CONTAINS
       END DO
       
     END SUBROUTINE DgRadiationIndexes
-
+#endif
+    
 !------------------------------------------------------------------------------
   END SUBROUTINE MakeListMatrix
 !------------------------------------------------------------------------------
+
+
+  ! Pick thet correct indexes for radition when using discontinuous Galerkin.
+  ! In internal BCs we expect to find 'emissivity' given on either side.
+  !--------------------------------------------------------------------------
+  SUBROUTINE DgRadiationIndexes(Element,n,ElemInds,DiffuseGray)
+
+    TYPE(Element_t), POINTER :: Element
+    INTEGER :: n
+    INTEGER :: ElemInds(:)
+    LOGICAL :: DiffuseGray
+
+    TYPE(Element_t), POINTER :: Left, Right, Parent
+    INTEGER :: i,i1,n1,mat_id
+    LOGICAL :: Found
+
+    Left => Element % BoundaryInfo % Left
+    Right => Element % BoundaryInfo % Right
+
+    IF(ASSOCIATED(Left) .AND. ASSOCIATED(Right)) THEN
+
+      IF( DiffuseGray ) THEN
+        DO i=1,2
+          IF(i==1) THEN
+            Parent => Left
+          ELSE
+            Parent => Right
+          END IF
+
+          mat_id = ListGetInteger( CurrentModel % Bodies(Parent % BodyId) % Values, &
+              'Material', Found, minv=1,maxv=CurrentModel % NumberOfMaterials )
+          IF(.NOT. Found ) THEN
+            CALL Fatal('DGRadiationIndexes','Body '//I2S(Parent % BodyId)//' has no Material associated!')
+          END IF
+          IF( ListCheckPresent( CurrentModel % Materials(mat_id) % Values,'Emissivity') ) EXIT
+
+          IF( i==2) THEN
+            CALL Fatal('DGRadiationIndexes','DG boundary parents should have emissivity!')
+          END IF
+        END DO
+      ELSE
+        IF( Left % BodyId > Right % BodyId ) THEN
+          Parent => Left
+        ELSE
+          Parent => Right
+        END IF
+      END IF
+    ELSE IF(ASSOCIATED(Left)) THEN
+      Parent => Left
+    ELSE IF(ASSOCIATED(Right)) THEN
+      Parent => Right
+    ELSE
+      CALL Fatal('DGRadiationIndexes','DG boundary should have parents!')
+    END IF
+
+    n1 = Parent % TYPE % NumberOfNodes
+    DO i=1,n
+      DO i1 = 1, n1
+        IF( Parent % NodeIndexes( i1 ) == Element % NodeIndexes(i) ) THEN
+          ElemInds(i) = Parent % DGIndexes( i1 )
+          EXIT
+        END IF
+      END DO
+    END DO
+
+  END SUBROUTINE DgRadiationIndexes
+
   
 !------------------------------------------------------------------------------
 !> Create a list matrix array given the mesh, the active domains and the elementtype 
@@ -1074,7 +1139,7 @@ CONTAINS
     INTEGER :: CurrentColour, BoundaryColour, CurrentColourStart, &
           CurrentColourEnd, NumberOfMeshColours
     LOGICAL :: NeedLocking, GotIt
-    CHARACTER(LEN=MAX_NAME_LEN) :: RadiationFlag
+    CHARACTER(:), ALLOCATABLE :: RadiationFlag
     CHARACTER(*), PARAMETER :: Caller = 'MakeListMatrixArray'
 !------------------------------------------------------------------------------
 
@@ -1233,14 +1298,14 @@ CONTAINS
            CurrentColourStart = 1
            CurrentColourEnd = Mesh % NumberOfBulkElements+Mesh % NumberOFBoundaryElements
          ELSE IF (CurrentColour <= Solver % ColourIndexList % n) THEN
-           CALL Info(Caller,'ListMatrix add colour: '//TRIM(I2S(CurrentColour)),Level=10)
+           CALL Info(Caller,'ListMatrix add colour: '//I2S(CurrentColour),Level=10)
            CurrentColourList => Solver % ColourIndexList
            ElementsList => Mesh % Elements(1:Mesh % NumberOfBulkElements)
            CurrentColourStart = CurrentColourList % Ptr(CurrentColour)
            CurrentColourEnd = CurrentColourList % Ptr(CurrentColour+1)-1
          ELSE
            BoundaryColour = CurrentColour-Solver % ColourIndexList % n
-           CALL Info(Caller,'ListMatrix add boundary colour: '//TRIM(I2S(BoundaryColour)),Level=10)
+           CALL Info(Caller,'ListMatrix add boundary colour: '//I2S(BoundaryColour),Level=10)
 
            CurrentColourList => Solver % BoundaryColourIndexList
            ! Boundary elements are stored after bulk elements in Mesh
@@ -1277,7 +1342,7 @@ CONTAINS
                ALLOCATE(Indexes(IndexSize), &
                    IndexReord(IndexSize), &
                    IPerm(IndexSize), STAT=istat )
-               IF( istat /= 0 ) CALL Fatal(Caller,'Allocation error for Indexes of size: '//TRIM(I2S(n)))
+               IF( istat /= 0 ) CALL Fatal(Caller,'Allocation error for Indexes of size: '//I2S(n))
             END IF
             
             n = 0
@@ -1304,7 +1369,7 @@ CONTAINS
                              + NDOFs * Mesh % NumberOfNodes
                      END DO
                   END DO
-                  IF ( GB ) THEN
+                  IF ( GB .AND. ASSOCIATED(Element % BoundaryInfo)) THEN
                     Edge1 => Mesh % Edges(Element % EdgeIndexes(1))
                     IF(Element % Type % ElementCode==Edge1 % Type % ElementCode) THEN
                       DO i=1, Element % BDOFs
@@ -1328,7 +1393,7 @@ CONTAINS
                   END DO
                END IF
 
-               IF ( GB ) THEN
+               IF ( GB.AND. ASSOCIATED(Element % BoundaryInfo) ) THEN
                  Face1 => Mesh % Faces(Element % FaceIndexes(1))
                  IF(Element % Type % ElementCode==Face1 % Type % ElementCode) THEN
                    DO i=1, Element % BDOFs
@@ -1375,8 +1440,6 @@ CONTAINS
 !     Diffuse gray radiation condition:
 !     ---------------------------------
       Radiation = ListGetLogical( Solver % Values, 'Radiation Solver', Found )
-      IF ( .NOT. Found .AND. PRESENT(Equation) ) &
-          Radiation = Radiation .OR. (Equation == 'heat equation')
       IF( Radiation ) THEN        
         Radiation = .FALSE.
         DO i=1,Model % NumberOfBCs
@@ -1396,17 +1459,17 @@ CONTAINS
           Mesh % NumberOfBulkElements + Mesh % NumberOfBoundaryElements
 
           Element => Mesh % Elements(i)
-          IF ( ASSOCIATED(Element % BoundaryInfo % GebhardtFactors) ) THEN
+          IF ( ASSOCIATED(Element % BoundaryInfo % RadiationFactors) ) THEN
              DO j=1,Element % TYPE % NumberOfNodes
                 k1 = Reorder(Element % NodeIndexes(j))
 
                 NumberOfFactors = Element % BoundaryInfo % &
-                  GebhardtFactors % NumberOfImplicitFactors
+                  RadiationFactors % NumberOfImplicitFactors
 
                 DO n=1,NumberOfFactors
 
                   Elm => Mesh % Elements( Element % BoundaryInfo % &
-                              GebhardtFactors % Elements(n) )
+                              RadiationFactors % Elements(n) )
 
                   DO k=1,Elm % TYPE % NumberOfNodes
                      k2 = Reorder( Elm % NodeIndexes(k) )
@@ -1458,7 +1521,7 @@ CONTAINS
           IF( ListGetLogical( Model % BCs(This) % Values,&
               'Periodic BC Use Lagrange Coefficient',Found)) CYCLE
 
-          CALL Info(Caller,'Adding matrix topology for BC: '//TRIM(I2S(This)),Level=10)
+          CALL Info(Caller,'Adding matrix topology for BC: '//I2S(This),Level=10)
 
           ! TODO: Add multithreading
           DO i=1,Projector % NumberOfRows
@@ -1635,7 +1698,8 @@ CONTAINS
 !------------------------------------------------------------------------------
    FUNCTION CreateMatrix( Model, Solver, Mesh, Perm, DOFs, MatrixFormat, &
           OptimizeBW, Equation, DGSolver, GlobalBubbles, &
-          NodalDofsOnly, ProjectorDofs, ThreadedStartup ) RESULT(Matrix)
+          NodalDofsOnly, ProjectorDofs, ThreadedStartup, &
+          UseGivenPerm ) RESULT(Matrix)
 !------------------------------------------------------------------------------
      IMPLICIT NONE
      TYPE(Model_t) :: Model
@@ -1647,6 +1711,7 @@ CONTAINS
      LOGICAL, OPTIONAL :: DGSolver, GlobalBubbles
      LOGICAL, OPTIONAL :: NodalDofsOnly, ProjectorDofs
      LOGICAL, OPTIONAL :: ThreadedStartup
+     LOGICAL, OPTIONAL :: USeGivenPerm
 
      CHARACTER(LEN=*), OPTIONAL :: Equation
 
@@ -1657,8 +1722,8 @@ CONTAINS
      TYPE(Matrix_t), POINTER :: A
      TYPE(Element_t), POINTER :: Element
      TYPE(ListMatrixEntry_t), POINTER :: CList
-     CHARACTER(LEN=MAX_NAME_LEN) :: Eq, str
-     LOGICAL :: GotIt, DG, GB, UseOptimized, Found
+     CHARACTER(:), ALLOCATABLE :: Eq,str
+     LOGICAL :: GotIt, DG, GB, UseOptimized, Found, UseGiven
      INTEGER i,j,k,l,k1,t,n, p,m, minEdgeDOFs, maxEdgeDOFs, &
            minFaceDOFs, maxFaceDOFs, BDOFs, cols, istat, &
            NDOFs
@@ -1678,6 +1743,15 @@ CONTAINS
 
      GB = .FALSE.
      IF ( PRESENT(GlobalBubbles) ) GB = GlobalBubbles
+
+     UseGiven = .FALSE.
+     IF( PRESENT( UseGivenPerm ) ) THEN
+       IF( UseGivenPerm ) THEN
+         CALL Info(Caller,'Using given Perm table to create the matrix',Level=6)
+         UseGiven = .TRUE.
+         OptimizeBW = .FALSE.
+       END IF
+     END IF
        
      IF( OptimizeBW ) THEN
        IF( ListGetLogical( Solver % Values,'DG Reduced Basis',Found ) ) THEN
@@ -1768,9 +1842,29 @@ CONTAINS
      
      Mesh % MaxBDOFs = BDOFs
      
-     Eq = ''
-     IF ( PRESENT( Equation ) ) n = StringToLowerCase( Eq,Equation )
+     IF (PRESENT( Equation)) THEN
+       n = LEN(Equation)
+       ALLOCATE(CHARACTER(n)::Eq)
+       n=StringToLowerCase(Eq,Equation)
+     ELSE
+       Eq = ' '
+     END IF
 
+     
+     IF( UseGiven ) THEN
+       k = MAXVAL( Perm ) 
+       ALLOCATE( InvInitialReorder(k), STAT=istat )
+       IF( istat /= 0 ) THEN
+         CALL Fatal(Caller,'Allocation error for InvInitialReorder of size: '//I2S(k))
+       END IF
+       InvInitialReorder = 0
+       DO i=1,SIZE(Perm)
+         IF (Perm(i)>0) InvInitialReorder(Perm(i)) = i
+       END DO
+       GOTO 10
+     END IF
+
+       
      Perm = 0
      IF ( PRESENT(Equation) ) THEN
        CALL Info(Caller,'Creating initial permutation',Level=14)
@@ -1806,17 +1900,17 @@ CONTAINS
            Perm(i) = j
          END IF
        END DO
-       PRINT *,'Eliminating '//TRIM(I2S(k-j))//' halo nodes out of '&
-           //TRIM(I2S(k))//' in partition '//TRIM(I2S(ParEnv % MyPe))
+       PRINT *,'Eliminating '//I2S(k-j)//' halo nodes out of '&
+           //I2S(k)//' in partition '//I2S(ParEnv % MyPe)
        k = j
      END IF
 
      
      IF( OptimizeBW ) THEN
-       CALL Info(Caller,'Creating inverse of initial order of size: '//TRIM(I2S(k)),Level=14)
+       CALL Info(Caller,'Creating inverse of initial order of size: '//I2S(k),Level=14)
        ALLOCATE( InvInitialReorder(k), STAT=istat )
        IF( istat /= 0 ) THEN
-         CALL Fatal(Caller,'Allocation error for InvInitialReorder of size: '//TRIM(I2S(k)))
+         CALL Fatal(Caller,'Allocation error for InvInitialReorder of size: '//I2S(k))
        END IF
 
        ! We need to keep the initial numbering only in case we optimize the bandwidth!
@@ -1829,7 +1923,7 @@ CONTAINS
      UseOptimized = ListGetLogical( Solver % Values, &
          'Optimize Bandwidth Use Always', GotIt )
           
-     Matrix => NULL()
+10   Matrix => NULL()
 
      ! check if matrix structures really need to be created:
      ! -----------------------------------------------------
@@ -1872,7 +1966,7 @@ CONTAINS
          CALL Fatal(Caller,'Multithreaded startup only supports CRS matrix format')
        END IF
        
-       CALL Info(Caller,'Matrix created',Level=14)
+       CALL Info(Caller,'Sparse atrix created',Level=14)
 
        CALL ListMatrixArray_Free( ListMatrixArray )       
      ELSE
@@ -1914,7 +2008,7 @@ CONTAINS
        CASE( MATRIX_SBAND )
          Matrix => Band_CreateMatrix( DOFs*k, DOFs*n,.TRUE.,.TRUE. )
        END SELECT
-       CALL Info(Caller,'Matrix created',Level=14)
+       CALL Info(Caller,'Sparse matrix created',Level=14)
 
        CALL List_FreeMatrix( k, ListMatrix )
      END IF
@@ -1936,18 +2030,18 @@ CONTAINS
        ALLOCATE( A % Rows(n+1), A % Diag(n), A % RHS(n), &
            ConstrainedNode(Mesh % NumberOfNodes), STAT=istat )
        IF( istat /= 0 ) THEN
-         CALL Fatal(Caller,'Allocation error for CRS matrix topology: '//TRIM(I2S(n)))
+         CALL Fatal(Caller,'Allocation error for CRS matrix topology: '//I2S(n))
        END IF
 
        DO i=1,n
          A % RHS(i:i) = ListGetConstReal( Solver % Values,  &
-           'Constraint DOF ' // TRIM(i2s(i)) // ' Value' )
+           'Constraint DOF ' // i2s(i) // ' Value' )
        END DO
 
        Cols = 0
        A % Rows(1) = 1
        DO i=1,n
-         WRITE( str, '(a)' ) 'Constraint DOF ' // TRIM(i2s(i)) // ' Body' 
+         str = 'Constraint DOF '//i2s(i)//' Body' 
          ivals => ListGetIntegerArray( Solver % Values, str, Found )
          IF ( ASSOCIATED(ivals) ) THEN
            ConstrainedNode = .FALSE.
@@ -1960,7 +2054,7 @@ CONTAINS
            Cols = Cols+DOFs*COUNT(ConstrainedNode)
          END IF
 
-         WRITE( str, '(a)' ) 'Constraint DOF ' // TRIM(i2s(i)) // ' BC'
+         str = 'Constraint DOF ' // i2s(i) // ' BC'
          Ivals => ListGetIntegerArray( Solver % Values, str, Found )
          IF ( ASSOCIATED(Ivals) ) THEN
            ConstrainedNode = .FALSE.
@@ -1978,13 +2072,13 @@ CONTAINS
 
        ALLOCATE( A % Cols(cols), A % Values(cols), STAT=istat )
        IF( istat /= 0 ) THEN
-         CALL Fatal(Caller,'Allocation error for CRS cols and values: '//TRIM(I2S(cols)))
+         CALL Fatal(Caller,'Allocation error for CRS cols and values: '//I2S(cols))
        END IF
        A % Cols = 0
        A % Values = 0
 
        DO i=1,n
-         WRITE( str, '(a)' ) 'Constraint DOF ' // TRIM(i2s(i)) // ' Body' 
+         str = 'Constraint DOF ' // i2s(i) // ' Body' 
          ivals => ListGetIntegerArray( Solver % Values, str, Found )
          IF ( ASSOCIATED(ivals) ) THEN
            DO k=1,Solver % Mesh % NumberOfBulkElements
@@ -2003,7 +2097,7 @@ CONTAINS
            END DO
          END IF
 
-         WRITE( str, '(a)' ) 'Constraint DOF ' // TRIM(i2s(i)) // ' BC'
+         str = 'Constraint DOF ' // i2s(i) // ' BC'
          ivals => ListGetIntegerArray( Solver % Values, str, Found )
          IF ( ASSOCIATED(ivals) ) THEN
            DO k=Solver % Mesh % NumberOfBulkElements+1, &
@@ -2064,9 +2158,9 @@ CONTAINS
      CALL CRS_SortMatrix(Matrix,.TRUE.)
      
      CALL Info('CreateOdeMatrix','Number of rows in ode matrix: '//&
-         TRIM(I2S(Matrix % NumberOfRows)), Level=9)
+         I2S(Matrix % NumberOfRows), Level=9)
      CALL Info('CreateOdeMatrix','Number of entries in ode matrix: '//&
-         TRIM(I2S(SIZE(Matrix % Cols)) ), Level=9)
+         I2S(SIZE(Matrix % Cols) ), Level=9)
      
      Matrix % Solver => Solver
      Matrix % DGMatrix = .FALSE.
@@ -2110,7 +2204,7 @@ CONTAINS
      CALL CRS_SortMatrix(Matrix,.TRUE.)
      
      CALL Info('CreateOdeMatrix','Number of rows in diag matrix: '//&
-         TRIM(I2S(Matrix % NumberOfRows)), Level=9)
+         I2S(Matrix % NumberOfRows), Level=9)
 
      IF( PRESENT( TimeOrder ) ) THEN
        IF( TimeOrder >= 1 ) THEN
@@ -2404,7 +2498,7 @@ CONTAINS
      REAL(KIND=dp), DIMENSION(Model % MaxElementNodes,3) :: IntegrandFunction
 !     REAL(KIND=dp), POINTER :: IntegrandFunction(:,:)
      CHARACTER(LEN=2) :: Component
-     CHARACTER(LEN=MAX_NAME_LEN) :: IntegrandFunctionComponent
+     CHARACTER(:), ALLOCATABLE :: IntegrandFunctionComponent
      REAL(KIND=dp) :: s,ug,vg,wg
      REAL(KIND=dp) :: Basis(Model % MaxElementNodes)
      REAL(KIND=dp) :: dBasisdx(Model % MaxElementNodes,3),SqrtElementMetric
@@ -2452,7 +2546,7 @@ CONTAINS
 ! ListGetRealArray doesn t exist, so we READ it component by component
 ! naming them with suffixes " 1" etc.
        DO j=1,DIM
-         IntegrandFunctionComponent = TRIM(IntegrandFunctionName)//' '//TRIM(I2S(j))
+         IntegrandFunctionComponent = TRIM(IntegrandFunctionName)//' '//I2S(j)
          IntegrandFunction(1:n,j) = ListGetReal( Model % Simulation, &
              IntegrandFunctionComponent, n, NodeIndexes )
        END DO
@@ -2555,7 +2649,7 @@ CONTAINS
      REAL(KIND=dp), DIMENSION(Model % MaxElementNodes,3) :: IntegrandFunction
 !     REAL(KIND=dp), POINTER :: IntegrandFunction(:,:)
      CHARACTER(LEN=2) :: Component
-     CHARACTER(LEN=MAX_NAME_LEN) :: IntegrandFunctionComponent
+     CHARACTER(:), ALLOCATABLE :: IntegrandFunctionComponent
      REAL(KIND=dp) :: s,ug,vg,wg
      REAL(KIND=dp) :: Basis(Model % MaxElementNodes)
      REAL(KIND=dp) :: dBasisdx(Model % MaxElementNodes,3),SqrtElementMetric
@@ -2603,7 +2697,7 @@ CONTAINS
 ! ListGetRealArray doesn t exist, so we READ it component by component
 ! naming them with suffixes " 1" etc.
        DO j=1,DIM
-         IntegrandFunctionComponent = TRIM(IntegrandFunctionName)//' '//TRIM(I2S(j))
+         IntegrandFunctionComponent = TRIM(IntegrandFunctionName)//' '//I2S(j)
          IntegrandFunction(1:n,j) = ListGetReal( Model % Simulation, &
              IntegrandFunctionComponent, n, NodeIndexes )
        END DO
@@ -2701,7 +2795,7 @@ CONTAINS
 !     LineElementNodes
 !     INPUT: List of nodal point coordinates
 !
-!  CHARACTER(LEN=MAX_NAME_LEN) :: IntegrandFunctionName
+!  CHARACTER(LEN=*) :: IntegrandFunctionName
 !     INPUT: Name the function has in the .sif file or somewhere else
 !
 !  LOGICAL :: QuadrantTreeExists
@@ -2740,7 +2834,7 @@ CONTAINS
 ! IntegrandFunction at the Gauss points
      REAL(KIND=dp), DIMENSION(LineElement % TYPE % GaussPoints,3) :: IntegrandFunction
      CHARACTER(LEN=2) :: Component
-     CHARACTER(LEN=MAX_NAME_LEN) :: IntegrandFunctionComponent
+     CHARACTER(:), ALLOCATABLE :: IntegrandFunctionComponent
      REAL(KIND=dp) :: s,ug,vg,wg
      REAL(KIND=dp) :: Basis(LineElement % TYPE % NumberOfNodes)
      REAL(KIND=dp) :: dBasisdx(LineElement % TYPE % NumberOfNodes,3),SqrtElementMetric
@@ -3129,7 +3223,129 @@ CONTAINS
      Normal = Normal / SQRT(SUM(c**2))
      
    END FUNCTION NormalOfDegenerateElement
- 
+
+
+!------------------------------------------------------------------------------
+   FUNCTION FindBoundaryEdgeIndex(Mesh,Boundary,nedge) RESULT(n)
+!------------------------------------------------------------------------------
+     IMPLICIT NONE
+     INTEGER :: n,nedge
+     TYPE(Mesh_t), POINTER :: Mesh
+     TYPE(Element_t) :: Boundary
+!------------------------------------------------------------------------------
+     INTEGER :: i,j,k,jb1,jb2,je1,je2
+     TYPE(Element_t), POINTER :: Parent, Edge, Face
+!------------------------------------------------------------------------------
+     n = 0
+     SELECT CASE(Boundary % TYPE % ElementCode / 100 )
+     CASE(1)
+       RETURN
+     CASE(2)
+       IF ( nedge==1 ) THEN
+         Parent => Boundary % BoundaryInfo % Left
+         IF ( .NOT. ASSOCIATED(Parent) ) &
+             Parent => Boundary % BoundaryInfo % Right
+
+         jb1 = Boundary % NodeIndexes(1)
+         jb2 = Boundary % NodeIndexes(2)
+         DO i=1,Parent % TYPE % NumberOfEdges
+           Edge => Mesh % Edges(Parent % EdgeIndexes(i))
+           je1 = Edge % NodeIndexes(1)
+           je2 = Edge % NodeIndexes(2)
+           IF ( jb1==je1.AND.jb2==je2 .OR. jb1==je2.AND.jb2==je1) EXIT
+         END DO
+         n = Parent % EdgeIndexes(i)
+       END IF
+     CASE(3,4)
+       j = FindBoundaryFaceIndex(Mesh,Boundary)
+       Face => Mesh % Faces(j)
+       IF ( nedge>0.AND.nedge<=Face % TYPE % NumberOfEdges ) &
+           n = Face % EdgeIndexes(nedge) 
+     END SELECT
+!------------------------------------------------------------------------------
+   END FUNCTION FindBoundaryEdgeIndex
+!------------------------------------------------------------------------------
+
+
+!------------------------------------------------------------------------------
+   FUNCTION FindBoundaryFaceIndex(Mesh,Boundary) RESULT(n)
+!------------------------------------------------------------------------------
+     IMPLICIT NONE
+     INTEGER :: n
+     TYPE(Element_t) :: Boundary
+     TYPE(Mesh_t), POINTER :: Mesh
+!------------------------------------------------------------------------------
+     INTEGER :: i,j,k,m
+     TYPE(Element_t), POINTER :: Parent, Face
+!------------------------------------------------------------------------------
+     Parent => Boundary % BoundaryInfo % Left
+     IF ( .NOT. ASSOCIATED(Parent) ) &
+         Parent => Boundary % BoundaryInfo % Right
+
+     DO i=1,Parent % TYPE % NumberOfFaces
+       Face => Mesh % Faces(Parent % FaceIndexes(i))
+       m = 0
+       DO j=1,Face % TYPE % NumberOfNodes
+         DO k=1,Boundary % TYPE % NumberOfNodes
+           IF ( Face % NodeIndexes(j)==Boundary % NodeIndexes(k)) m=m+1
+         END DO
+       END DO
+       IF ( m==Face % TYPE % NumberOfNodes) EXIT
+     END DO
+     n = Parent % FaceIndexes(i)
+!------------------------------------------------------------------------------
+   END FUNCTION FindBoundaryFaceIndex
+!------------------------------------------------------------------------------
+
+   
+!-----------------------------------------------------------------------------   
+!> Given basis function values at surface element find the corresponding local
+!> coordinate in the parent element. 
+!------------------------------------------------------------------------------
+   SUBROUTINE FindParentUVW( Element, n, Parent, np, U, V, W, Basis ) 
+!------------------------------------------------------------------------------
+     IMPLICIT NONE
+     TYPE( Element_t ), POINTER :: Element
+     TYPE( Element_t ), POINTER :: Parent
+     INTEGER :: n, np
+     REAL( KIND=dp ) :: U, V, W, Basis(:)
+!------------------------------------------------------------------------------
+    INTEGER :: i, j, nParent, check 
+    REAL(KIND=dp) :: NodalParentU(n), NodalParentV(n), NodalParentW(n)
+!------------------------------------------------------------------------------
+
+    Check = 0
+
+    DO i = 1,n
+      DO j = 1,np
+        IF( Element % NodeIndexes(i) == Parent % NodeIndexes(j) ) THEN
+          Check = Check + 1
+          NodalParentU(i) = Parent % Type % NodeU(j)
+          NodalParentV(i) = Parent % Type % NodeV(j)
+          NodalParentW(i) = Parent % Type % NodeW(j)
+        END IF
+      END DO
+    END DO
+
+    IF( Check /= n ) THEN
+      IF(n /= Element % TYPE % NumberOfNodes ) THEN
+        CALL Warn('FindParentUVW','Inconsistent size for "n"!')
+      END IF
+      IF(np /= Parent % TYPE % NumberOfNodes ) THEN
+        CALL Warn('FindParentUVW','Inconsistent size for "np"!')
+      END IF
+      CALL Fatal('FindParentUVW','Could not find all nodes in parent!') 
+    END IF
+    
+    U = SUM( Basis(1:n) * NodalParentU(1:n) )
+    V = SUM( Basis(1:n) * NodalParentV(1:n) )
+    W = SUM( Basis(1:n) * NodalParentW(1:n) )
+!------------------------------------------------------------------------------      
+  END SUBROUTINE FindParentUVW
+!------------------------------------------------------------------------------      
+
+
+   
 END MODULE ElementUtils
 
 !> \} ElmerLib
