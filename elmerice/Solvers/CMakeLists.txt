@@ -26,6 +26,7 @@ ELSE()
   MESSAGE(WARNING "  \n Missing: >NetCDF_INCLUDE_DIR< , >NetCDF_LIBRARY<,  >NetCDFF_LIBRARY< \n some functionalities will be disabled")
 ENDIF(NETCDF_FOUND)
 
+
 # ---------------------- #
 # -- HDF5 libraries -- #
 #----------------------- #
@@ -63,7 +64,7 @@ SET(CMAKE_Fortran_MODULE_DIRECTORY
 SET(ElmerIce_SRC ElmerIceUtils.F90 AIFlowSolve_nlD2.F90 AIFlowSolve_nlS2.F90
     AIFlowSolve_nlS2_3d.F90 CaffeSolver.F90 ComputeDevStressNS.F90 ComputeEigenValues.F90 
     ComputeNormal.F90 ComputeStrainRate.F90 DeformationalHeat.F90 
-    EPLSolver.F90 fAandfB_in.F90 FabricSolve.F90 Flowdepth.F90 
+    EPLSolver.F90 FabricSolve.F90 Flowdepth.F90 
     ForceToStress.F90 GetHydrostaticLoads.F90  GolfLaw.F90 
     GroundedSolver.F90  IntegratedVelocity.F90  IDSSolver.F90 
     PorousSolve.F90  pointwise.F90  SIASolver.F90  SSASolver.F90  
@@ -110,6 +111,12 @@ ENDIF()
 
 IF(HAVE_MMG)
   SET(ElmerIce_SRC ${ElmerIce_SRC} CalvingRemeshMMG.F90 ) #MMG3DSolver.F90 <- defunct?
+ENDIF()
+
+### add ParMMG??
+
+IF(HAVE_PARMMG)
+  SET(ElmerIce_SRC ${ElmerIce_SRC} CalvingRemeshparMMG.F90 )
 ENDIF()
 
 IF(HAVE_XIOS)

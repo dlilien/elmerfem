@@ -316,6 +316,7 @@ void Meshutils::findSurfaceElements(mesh_t *mesh)
 	}
 	
 	int facenodes = degree * faceedges;
+        if (code == 827) facenodes = 9;
 
 	s->setNodes(facenodes);
 	s->setCode(100 * faceedges + facenodes);
@@ -1725,6 +1726,17 @@ void Meshutils::findSurfaceElementNormals(mesh_t *mesh)
 	  surface->setNodeIndex(5, surface->getNodeIndex(6));
 	  surface->setNodeIndex(6, tmp);
 
+	} else if(surface->getCode() == 409) {
+	  int tmp = surface->getNodeIndex(1);
+	  surface->setNodeIndex(1, surface->getNodeIndex(3));
+	  surface->setNodeIndex(3, tmp);
+	  tmp = surface->getNodeIndex(4);
+	  surface->setNodeIndex(4, surface->getNodeIndex(7));
+	  surface->setNodeIndex(7, tmp);
+	  tmp = surface->getNodeIndex(5);
+	  surface->setNodeIndex(5, surface->getNodeIndex(6));
+	  surface->setNodeIndex(6, tmp);
+
 	} else {
 	  cout << "findSurfaceElementNormals: error: unable to change element orientation" << endl;
 	  cout.flush();
@@ -1905,7 +1917,7 @@ void Meshutils::increaseElementOrder(mesh_t *mesh)
     int family = e->getCode() / 100;
     int edges = familyedges[family];
 
-    // Skip undtermined and nonlinear element 
+    // Skip undetermined and nonlinear element
     if((e->getNodes() < 2) || (e->getNodes() > familylinnodes[family])) continue;
 
     for(int f=0; f<edges; f++) {

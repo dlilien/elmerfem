@@ -101,7 +101,8 @@ MODULE Types
   INTEGER, PARAMETER :: PROJECTOR_TYPE_DEFAULT = 0, &  ! unspecified constraint matrix
                         PROJECTOR_TYPE_NODAL = 1, &    ! nodal projector
                         PROJECTOR_TYPE_GALERKIN = 2, & ! Galerkin projector
-                        PROJECTOR_TYPE_INTEGRAL = 3 
+                        PROJECTOR_TYPE_INTEGRAL = 3, & 
+                        PROJECTOR_TYPE_ROBIN = 4 
                         
   INTEGER, PARAMETER :: DIRECT_NORMAL = 0, & ! Normal direct method
                         DIRECT_PERMON = 1    ! Permon direct method
@@ -414,6 +415,9 @@ MODULE Types
 #ifdef DEVEL_LISTCOUNTER 
      INTEGER :: Counter = 0
 #endif
+#ifdef DEVEL_LISTUSAGE
+     INTEGER :: Counter = 0
+#endif
 
      LOGICAL :: LuaFun = .FALSE.
      INTEGER :: partag = 0
@@ -428,7 +432,8 @@ MODULE Types
    TYPE VariableTable_t     
      TYPE(Variable_t), POINTER :: Variable => NULL()
      TYPE(ValueListEntry_t), POINTER :: Keyword => NULL()
-     REAL(KIND=dp) :: ParamValue
+     REAL(KIND=dp) :: ParamValue 
+     INTEGER :: tstep = 0
    END TYPE VariableTable_t
 
    
@@ -751,16 +756,16 @@ MODULE Types
 
    TYPE ParallelInfo_t
      INTEGER :: NumberOfIfDOFs
-     LOGICAL, POINTER               :: GInterface(:)
-     INTEGER, POINTER               :: GlobalDOFs(:)
-     TYPE(NeighbourList_t),POINTER  :: NeighbourList(:)
+     LOGICAL, POINTER               :: GInterface(:) => NULL()
+     INTEGER, POINTER               :: GlobalDOFs(:) => NULL()
+     TYPE(NeighbourList_t),POINTER  :: NeighbourList(:) => NULL()
      INTEGER, POINTER               :: Gorder(:) => NULL()
 
-     LOGICAL, POINTER               :: FaceInterface(:)
-     TYPE(NeighbourList_t),POINTER  :: FaceNeighbourList(:)
+     LOGICAL, POINTER               :: FaceInterface(:) => NULL()
+     TYPE(NeighbourList_t),POINTER  :: FaceNeighbourList(:) => NULL()
 
-     LOGICAL, POINTER               :: EdgeInterface(:)
-     TYPE(NeighbourList_t),POINTER  :: EdgeNeighbourList(:)
+     LOGICAL, POINTER               :: EdgeInterface(:) => NULL()
+     TYPE(NeighbourList_t),POINTER  :: EdgeNeighbourList(:) => NULL()
    END TYPE ParallelInfo_t
 
 !------------------------------------------------------------------------------
@@ -848,6 +853,7 @@ MODULE Types
      REAL(KIND=dp) :: SlaveScale = 1.0_dp
      REAL(KIND=dp) :: MasterScale = 1.0_dp
      LOGICAL :: LumpedDiag = .TRUE.
+     INTEGER :: RowOffset = 0
    END TYPE MortarBC_t
 
    TYPE TabulatedBasisAtIp_t
@@ -910,7 +916,8 @@ MODULE Types
       TYPE(Graph_t), POINTER :: BoundaryColourIndexList => NULL()
       INTEGER :: CurrentColour = 0, CurrentBoundaryColour = 0
       INTEGER :: DirectMethod = DIRECT_NORMAL
-      LOGICAL :: GlobalBubbles = .FALSE., DG = .FALSE.
+      LOGICAL :: GlobalBubbles = .FALSE.
+      LOGICAL :: DG = .FALSE.
       TYPE(C_PTR) :: CWrap = C_NULL_PTR
       TYPE(IntegrationPointsTable_t), POINTER :: IPTable => NULL()
       LOGICAL :: Parallel = .FALSE.
@@ -1091,7 +1098,7 @@ MODULE Types
 
     INTEGER :: ELMER_COMM_WORLD = -1
 
-    CHARACTER(len=*),PARAMETER :: xios_id="elmerice"
+    CHARACTER(len=MAX_NAME_LEN) :: ExecID
 !------------------------------------------------------------------------------
 END MODULE Types
 !------------------------------------------------------------------------------
