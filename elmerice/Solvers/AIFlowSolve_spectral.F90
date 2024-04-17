@@ -34,7 +34,7 @@
 !> Module containing a solver for (primarily thermal) anisotropic flow
    RECURSIVE SUBROUTINE AIFlowSolver_spectral( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
-    USE SpecFab
+    USE SpecFab, only: Eij_tranisotropic, a2, initspecfab, frame, cmat_inverse_orthotropic_dimless
     USE DefUtils
 
     IMPLICIT NONE
@@ -966,7 +966,7 @@
         REAL(KIND=dp) :: ss, LGrad(3,3), SR(3,3), Stress(3,3), StrainRate(3,3), D(6), epsi
         INTEGER :: INDi(6), INDj(6)
         ! For nonlinear orthotropic rheology
-        REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+        REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(6)
         INTEGER :: ind(3)
         ! For GOLF
         REAL(KIND=dp) :: ai(3), Angle(3), a2full(3, 3), a2e(6), nn
@@ -1096,10 +1096,10 @@
              ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
              ! symmetry/reflection axes = eigen directions).
              CALL frame(fabric, 'e', e1,e2,e3, eigvals) ! fabric and 'e' are inputs
-             Eij = Eeiej(fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+             Eij = Eij_tranisotropic(fabric, e1,e2,e3, Wn(8:9), Wn(10), INT(Wn(11)))
 
              ! Get C and ss, the enhancement of A relative to A_glen
-             CALL Cmat_inverse_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, &
+             CALL Cmat_inverse_orthotropic_dimless(SR, Wn(2), e1,e2,e3, &
                     Eij, MinSRInvariant, ss, C)
             END IF !NLRheo
 
@@ -1422,7 +1422,7 @@
         COMPLEX(kind=dp) :: Fabric(nlm_len)
 
         ! For full nonlinear orthotropic rheology
-        REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+        REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(6)
 
         INTERFACE
           Subroutine R2Ro(a2,dim,spoofdim,ai,angle)
@@ -1501,10 +1501,10 @@
             ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
             ! symmetry/reflection axes = eigen directions).
             CALL frame(Fabric, 'e', e1,e2,e3, eigvals) ! outputs are e1(3),e2(3),e3(3), eigvals(3)
-            Eij = Eeiej(Fabric, e1,e2,e3, Wn(8), Wn(9), Wn(10), INT(Wn(11)))
+            Eij = Eij_tranisotropic(Fabric, e1,e2,e3, Wn(8:9), Wn(10), INT(Wn(11)))
 
             ! Get C and ss, the enhancement of A relative to A_glen
-            CALL Cmat_inverse_orthotropic_dimless(StrainRate, INT(Wn(2)), e1,e2,e3, Eij, MinSRInvariant, ss, EnhancementFactors)
+            CALL Cmat_inverse_orthotropic_dimless(StrainRate, Wn(2), e1,e2,e3, Eij, MinSRInvariant, ss, EnhancementFactors)
           ELSE ! GOLF
             a2full = a2(Fabric)
             a2e(1) = a2full(1, 1)

@@ -37,7 +37,8 @@
 !------------------------------------------------------------------------------
       RECURSIVE SUBROUTINE FabricSolverSpectral( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
-      USE SpecFab
+      USE SpecFab, only : Eij_tranisotropic, apply_bounds, M_DDRX, M_LROT, M_CDRX, M_REG,&
+        rheo_rev_orthotropic_dimless, initspecfab, frame
       USE DefUtils
 
       IMPLICIT NONE
@@ -70,14 +71,13 @@
 !------------------------------------------------------------------------------
      TYPE(Matrix_t),POINTER :: StiffMatrix
 
-     INTEGER :: dim,n1,n2,i,j,k,n,t,iter,STDOFs,istat,spoofdim
+     INTEGER :: dim,n1,n2,i,j,k,n,t,iter,STDOFs,istat,spoofdim, material_id
 
-     TYPE(ValueList_t),POINTER :: Material, BC, SolverParams
+     TYPE(ValueList_t),POINTER :: Material, BC, SolverParams, Equation
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement, Element, &
               ParentElement, LeftParent, RightParent, Edge
-
-     REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm, &
+REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm, &
          NewtonTol,NonlinearTol,Wn(18)
 
 
@@ -107,7 +107,7 @@
 !
      INTEGER :: old_body = -1, prev_comps, spectral_l, spectral_m
 
-     LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE.
+     LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE., Found, FlowSolutionFound
 
      TYPE(Variable_t), POINTER :: TimeVar
 
@@ -126,7 +126,8 @@
           spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad,gammanaught,&
           LocalFabric, LocalLHS, ElLHSVals, nlm
 !------------------------------------------------------------------------------
-     CHARACTER(LEN=MAX_NAME_LEN) :: TempVar, OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
+     CHARACTER(LEN=MAX_NAME_LEN) :: TempVar, OOPlaneRotVar13, OOPLaneRotVar23,&
+       FabVarName, FlowSolName, ConvectionFlag 
 
      REAL(KIND=dp) :: SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
@@ -228,11 +229,7 @@
       END IF
       WRITE(Message,'(A,A)') 'OOPlane13 variable = ', OOPlaneRotVar13
       CALL INFO('FabricSolveSpectral', Message , level = 20)
-      FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
-      IF ( ASSOCIATED( FlowVariable ) ) THEN
-       FlowPerm    => FlowVariable % Perm
-       FlowValues  => FlowVariable % Values
-      END IF
+
       
 !!!!! Mesh Velo
      MeshVeloVariable => VariableGet( Solver % Mesh % Variables, &
@@ -392,6 +389,62 @@
          LocalFluidity(1:n) = ListGetReal( Material, &
                          'Fluidity Parameter', n, NodeIndexes, GotIt,&
                          UnFoundFatal=UnFoundFatal)
+
+        ! cycle halo elements
+        !-------------------
+        IF (ParEnv % myPe .NE. CurrentElement % partIndex) CYCLE
+
+
+        IF (.NOT.ASSOCIATED(CurrentElement)) CYCLE
+        IF ( CurrentElement % BodyId /= body_id ) THEN
+           Equation => GetEquation()
+           IF (.NOT.ASSOCIATED(Equation)) THEN
+              WRITE (Message,'(A,I3)') 'No Equation  found for boundary element no. ', t
+              CALL FATAL("FabricSolveSpectral",Message)
+           END IF
+
+           ConvectionFlag = GetString( Equation, 'Convection', Found )
+
+           Material => GetMaterial()
+           IF (.NOT.ASSOCIATED(Material)) THEN
+              WRITE (Message,'(A,I3)') 'No Material found for boundary element no. ', t
+              CALL FATAL("FabricSolveSpectral",Message)
+           ELSE
+              material_id = GetMaterialId( CurrentElement, Found)
+              IF(.NOT.Found) THEN
+                 WRITE (Message,'(A,I3)') 'No Material ID found for boundary element no. ', t
+                 CALL FATAL("FabricSolveSpectral",Message)
+              END IF
+           END IF
+        END IF
+
+        Equation => GetEquation()
+        SELECT CASE( GetString(Equation, 'Convection', Found ) )
+
+           !-----------------
+        CASE( 'computed' )
+           !-----------------
+
+           FlowSolName =  GetString( Equation,'Flow Solution Name', FlowSolutionFound)
+           IF(.NOT.FlowSolutionFound) THEN        
+              CALL WARN('FabricSolver','Keyword >Flow Solution Name< not found in section >Equation<')
+              CALL WARN('FabricSolver','Taking default value >Flow Solution<')
+              WRITE(FlowSolName,'(A)') 'AIFlow'
+           END IF
+
+
+           FlowVariable => VariableGet( Solver % Mesh % Variables, FlowSolName )
+           IF ( ASSOCIATED( FlowVariable ) ) THEN
+              FlowPerm     => FlowVariable % Perm
+              FlowValues => FlowVariable % Values
+              FlowSolutionFound = .TRUE.
+           ELSE
+              CALL INFO('FabricSolver','No Flow Solution associated',Level=1)
+              FlowSolutionFound = .FALSE.
+           END IF
+        CASE( "none")
+           FlowSolutionFound = .FALSE.
+        END SELECT
 !------------------------------------------------------------------------------
 !        Get element local stiffness & mass matrices
 !------------------------------------------------------------------------------
@@ -1004,7 +1057,7 @@ CONTAINS
      TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
 
      ! For new orthotropic law
-     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(6)
 
 
       INTERFACE
@@ -1097,7 +1150,7 @@ CONTAINS
 
       ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
       ! symmetry/reflection axes = eigen directions).
-      Eij = Eeiej(fabric, e1,e2,e3, Wn(14), Wn(15), Wn(16), INT(Wn(17)))
+      Eij = Eij_tranisotropic(fabric, e1,e2,e3, Wn(14:15), Wn(16), INT(Wn(17)))
 
       ! A_specfab = 2.0_dp**((Wn(2)-1.0_dp)/2.0_dp)
       ! Inverse rheology
@@ -1110,7 +1163,7 @@ CONTAINS
       do i = 1,3
             SR(i,i) = SR(i,i) / 2.0_dp
       end do
-      Stress = rheo_rev_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij)
+      Stress = rheo_rev_orthotropic_dimless(SR, Wn(2), e1,e2,e3, Eij)
       do i = 1,3
         do j = 1,3
             if (i.ne.j) then

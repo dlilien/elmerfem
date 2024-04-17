@@ -15,11 +15,11 @@ IF(NETCDF_FOUND)
 
   SET(HAVE_NETCDF TRUE)
   MARK_AS_ADVANCED(HAVE_NETCDF)
-  INCLUDE_DIRECTORIES(${NetCDF_INCLUDE_DIR})
+  INCLUDE_DIRECTORIES(${NETCDF_INCLUDE_DIR})
   ADD_DEFINITIONS(-DHAVE_NETCDF)
 
   MESSAGE(STATUS "  NetCDF:           " "${NETCDF_FOUND}")
-  MESSAGE(STATUS "  NetCDF_INC:       " "${NetCDF_INCLUDE_DIR}")
+  MESSAGE(STATUS "  NetCDF_INC:       " "${NETCDF_INCLUDE_DIR}")
   MESSAGE(STATUS "  NetCDF_LIBS:     " "${NETCDF_LIBRARIES}")
 ELSE()
   MESSAGE(STATUS "Library not found: >NetCDF_FOUND< ")
@@ -62,7 +62,7 @@ SET(CMAKE_Fortran_MODULE_DIRECTORY
   ${PROJECT_BINARY_DIR}/fmodules CACHE PATH "Directory for Fortran modules")
 
 SET(ElmerIce_SRC ElmerIceUtils.F90 AIFlowSolve_nlD2.F90 AIFlowSolve_nlS2.F90
-    AIFlowSolve_nlS2_3d.F90 CaffeSolver.F90 ComputeDevStressNS.F90 ComputeEigenValues.F90 
+    AIFlowSolve_nlS2_3d.F90 CaffeSolver.F90 ComputeDevStress.F90 ComputeEigenValues.F90 
     ComputeNormal.F90 ComputeStrainRate.F90 DeformationalHeat.F90 
     EPLSolver.F90 FabricSolve.F90 Flowdepth.F90 
     ForceToStress.F90 GetHydrostaticLoads.F90  GolfLaw.F90 
@@ -156,7 +156,7 @@ ENDIF()
 TARGET_LINK_LIBRARIES(ElmerIceSolvers elmersolver ElmerIceUtils)
 
 IF(HAVE_NETCDF)
-  TARGET_LINK_LIBRARIES(ElmerIceSolvers ${NetCDF_LIBRARIES})
+    TARGET_LINK_LIBRARIES(ElmerIceSolvers ${NETCDF_LIBRARIES})
 ENDIF()
 IF(HAVE_SpecFab)
   TARGET_LINK_LIBRARIES(ElmerIceSolvers ${SpecFab_LIBRARIES})
