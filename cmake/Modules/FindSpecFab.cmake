@@ -17,6 +17,9 @@ FIND_LIBRARY(SpecFab_LIBRARY specfab HINTS
   "${SpecFabLIB}"
   "$ENV{SpecFabROOT}"
   "$ENV{SpecFabLIB}"
+  "$ENV{SPECFAB_LIBRARY}"
+  "$ENV{SPECFAB_ROOT}"
+  "$ENV{SPECFAB_ROOT}/lib"
   )
 
 FIND_PATH(SpecFab_INCLUDE_DIR
@@ -25,7 +28,9 @@ FIND_PATH(SpecFab_INCLUDE_DIR
   "${SpecFabROOT}"
   "${SpecFabINCLUDE}"
   "$ENV{SpecFabROOT}"
-  "$ENV{SpecFabINCLUDE}"
+  "$ENV{SPECFAB_INCLUDE_DIR}"
+  "$ENV{SPECFAB_ROOT}"
+  "$ENV{SPECFAB_ROOT}/include"
   )
 
 IF (SpecFab_LIBRARY AND SpecFab_INCLUDE_DIR)

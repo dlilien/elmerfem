@@ -37,7 +37,9 @@
 !------------------------------------------------------------------------------
       RECURSIVE SUBROUTINE FabricSolverSpectral( Model,Solver,dt,TransientSimulation )
 !------------------------------------------------------------------------------
-      USE SpecFab
+      USE SpecFab, ONLY: Eij_tranisotropic, rheo_rev_orthotropic_dimless, &
+                         M_LROT, M_REG, M_DDRX, M_CDRX, &
+                         apply_bounds, InitSpecFab, frame
       USE DefUtils
 
       IMPLICIT NONE
@@ -64,7 +66,6 @@
      TYPE(Solver_t), TARGET :: Solver
 
      LOGICAL ::  TransientSimulation
-     REAL(KIND=dp) :: dt
 !------------------------------------------------------------------------------
 !    Local variables
 !------------------------------------------------------------------------------
@@ -77,11 +78,10 @@
      TYPE(Element_t),POINTER :: CurrentElement, Element, &
               ParentElement, LeftParent, RightParent, Edge
 
-     REAL(KIND=dp) :: RelativeChange,UNorm,PrevUNorm, &
-         NewtonTol,NonlinearTol,Wn(18)
-
-
      INTEGER :: NewtonIter,NonlinearIter
+
+     REAL(KIND=dp) :: dt,RelativeChange,UNorm,PrevUNorm, &
+         NewtonTol,NonlinearTol,Wn(18)
 
      TYPE(Variable_t), POINTER :: FabricSol, TempSol, FlowVariable, &
                                   MeshVeloVariable,TensorFabricVariable,&
@@ -1004,7 +1004,7 @@ CONTAINS
      TYPE(GaussIntegrationPoints_t), TARGET :: IntegStuff
 
      ! For new orthotropic law
-     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(3,3)
+     REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(6)
 
 
       INTERFACE
@@ -1097,7 +1097,7 @@ CONTAINS
 
       ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
       ! symmetry/reflection axes = eigen directions).
-      Eij = Eeiej(fabric, e1,e2,e3, Wn(14), Wn(15), Wn(16), INT(Wn(17)))
+      Eij = Eij_tranisotropic(fabric, e1,e2,e3, Wn(14:15), Wn(16), INT(Wn(17)))
 
       ! A_specfab = 2.0_dp**((Wn(2)-1.0_dp)/2.0_dp)
       ! Inverse rheology
@@ -1110,7 +1110,7 @@ CONTAINS
       do i = 1,3
             SR(i,i) = SR(i,i) / 2.0_dp
       end do
-      Stress = rheo_rev_orthotropic_dimless(SR, INT(Wn(2)), e1,e2,e3, Eij)
+      Stress = rheo_rev_orthotropic_dimless(SR, Wn(2), e1,e2,e3, Eij)
       do i = 1,3
         do j = 1,3
             if (i.ne.j) then
