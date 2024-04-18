@@ -203,27 +203,23 @@ use spariterglobals
 !-------------------------------------------------------------------------------
 
      CALL Info( 'OptimizeBandwidth', &
-               '---------------------------------------------------------', Level=4 )
-     CALL Info( 'OptimizeBandwidth', 'Computing matrix structure for: ' &
-                 // TRIM(Equation) //  '...', .TRUE., Level=4)
+               '---------------------------------------------------------', Level=6 )
+     CALL Info( 'OptimizeBandwidth', 'Computing matrix structure for: '// TRIM(Equation) , Level=6)
 
      HalfBandwidth = ComputeBandWidth( LocalNodes, ListMatrix )+1
 
-     CALL Info( 'OptimizeBandwidth', 'done.', Level=4 )
-     WRITE( Message,'(A,I0)' ) 'Half bandwidth without optimization: ', HalfBandwidth
-     CALL Info( 'OptimizeBandwidth', Message, Level=4 )
+     CALL Info( 'OptimizeBandwidth','Initial bandwidth for '&
+         //TRIM(Equation)//': '//I2S(HalfBandwidth),Level=4)
 
      IF ( .NOT.Optimize ) THEN
        CALL Info( 'OptimizeBandwidth', &
-               '---------------------------------------------------------', Level=4 )
+               '---------------------------------------------------------', Level=6 )
        RETURN
      END IF
 
 !-------------------------------------------------------------------------------
      HalfBandWidthBefore = HalfBandWidth
 
-     CALL Info( 'OptimizeBandwidth', ' ', Level=4 )
-     CALL Info( 'OptimizeBandwidth', 'Bandwidth Optimization ...', .TRUE.,Level=4 )
 !-------------------------------------------------------------------------------
 !    Search for node to start
 !-------------------------------------------------------------------------------
@@ -240,7 +236,7 @@ use spariterglobals
      ALLOCATE(DoneAlready(LocalNodes),STAT=istat)
      IF( istat /= 0 ) THEN
        CALL Fatal('OptimizeBandwidth','Allocation error for DoneAlready of size: '&
-           //TRIM(I2S(LocalNodes)))
+           //I2S(LocalNodes))
      END IF
 
      MaxLevel = 0
@@ -280,14 +276,14 @@ use spariterglobals
      ALLOCATE( PermLocal(SIZE(Perm)), STAT=istat )
      IF( istat /= 0 ) THEN
        CALL Fatal('OptimizeBandwidth','Allocation error for PermLocal: '//&
-           TRIM(I2S(SIZE(Perm))))
+           I2S(SIZE(Perm)))
      END IF
      PermLocal = 0
 
      ALLOCATE( DoneIndex(LocalNodes), STAT=istat )
      IF( istat /= 0 ) THEN
        CALL Fatal('OptimizeBandwidth','Allocation error for DoneIndex: '&
-           //TRIM(I2S(LocalNodes)))
+           //I2S(LocalNodes))
      END IF
      DoneIndex = 0
 !-------------------------------------------------------------------------------
@@ -330,10 +326,10 @@ use spariterglobals
 
      HalfBandWidthAfter = ComputeBandwidth( LocalNodes, &
            ListMatrix,Perm,InvInitialReorder )+1
-     CALL Info( 'OptimizeBandwidth', 'done.', Level=4 )
 
-     WRITE( Message,'(A,I0)') 'Half bandwidth after optimization: ', HalfBandwidthAfter
-     CALL Info( 'OptimizeBandwidth', Message, Level=4 )
+     CALL Info( 'OptimizeBandwidth','Optimized bandwidth for '&
+         //TRIM(Equation)//': '//I2S(HalfBandwidthAfter),Level=4)
+
      HalfBandWidth = HalfBandWidthAfter
 
      IF ( HalfBandWidthBefore < HalfBandWidth .AND. .NOT. UseOptimized ) THEN
@@ -342,8 +338,8 @@ use spariterglobals
        HalfBandWidth = HalfBandWidthBefore
        Perm = PermLocal
      END IF
-     CALL Info( 'OptimizeBandwidth', &
-             '---------------------------------------------------------',Level=4 )
+     CALL Info( 'OptimizeBandwidth',&
+         '---------------------------------------------------------',Level=6 )
 
      DEALLOCATE( PermLocal,DoneAlready )
 !-------------------------------------------------------------------------------

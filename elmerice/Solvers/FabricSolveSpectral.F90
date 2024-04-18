@@ -71,9 +71,9 @@
 !------------------------------------------------------------------------------
      TYPE(Matrix_t),POINTER :: StiffMatrix
 
-     INTEGER :: dim,n1,n2,i,j,k,n,t,iter,STDOFs,istat,spoofdim
+     INTEGER :: dim,n1,n2,i,j,k,n,t,iter,STDOFs,istat,spoofdim, material_id
 
-     TYPE(ValueList_t),POINTER :: Material, BC, SolverParams
+     TYPE(ValueList_t),POINTER :: Material, BC, SolverParams, Equation
      TYPE(Nodes_t) :: ElementNodes
      TYPE(Element_t),POINTER :: CurrentElement, Element, &
               ParentElement, LeftParent, RightParent, Edge
@@ -107,7 +107,7 @@
 !
      INTEGER :: old_body = -1, prev_comps, spectral_l, spectral_m
 
-     LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE.
+     LOGICAL :: AllocationsDone = .FALSE., FirstTime = .TRUE., Found, FlowSolutionFound
 
      TYPE(Variable_t), POINTER :: TimeVar
 
@@ -126,7 +126,8 @@
           spoofdim, FabVarName, FirstTime, ElGradVals, LocalGrad,gammanaught,&
           LocalFabric, LocalLHS, ElLHSVals, nlm
 !------------------------------------------------------------------------------
-     CHARACTER(LEN=MAX_NAME_LEN) :: TempVar, OOPlaneRotVar13, OOPLaneRotVar23, FabVarName
+     CHARACTER(LEN=MAX_NAME_LEN) :: TempVar, OOPlaneRotVar13, OOPLaneRotVar23,&
+       FabVarName, FlowSolName, ConvectionFlag 
 
      REAL(KIND=dp) :: SaveTime = -1
      REAL(KIND=dp), POINTER :: PrevFabric(:),CurrFabric(:),TempFabVal(:)
@@ -228,11 +229,7 @@
       END IF
       WRITE(Message,'(A,A)') 'OOPlane13 variable = ', OOPlaneRotVar13
       CALL INFO('FabricSolveSpectral', Message , level = 20)
-      FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
-      IF ( ASSOCIATED( FlowVariable ) ) THEN
-       FlowPerm    => FlowVariable % Perm
-       FlowValues  => FlowVariable % Values
-      END IF
+
       
 !!!!! Mesh Velo
      MeshVeloVariable => VariableGet( Solver % Mesh % Variables, &
@@ -392,6 +389,62 @@
          LocalFluidity(1:n) = ListGetReal( Material, &
                          'Fluidity Parameter', n, NodeIndexes, GotIt,&
                          UnFoundFatal=UnFoundFatal)
+
+        ! cycle halo elements
+        !-------------------
+        IF (ParEnv % myPe .NE. CurrentElement % partIndex) CYCLE
+
+
+        IF (.NOT.ASSOCIATED(CurrentElement)) CYCLE
+        IF ( CurrentElement % BodyId /= body_id ) THEN
+           Equation => GetEquation()
+           IF (.NOT.ASSOCIATED(Equation)) THEN
+              WRITE (Message,'(A,I3)') 'No Equation  found for boundary element no. ', t
+              CALL FATAL("FabricSolveSpectral",Message)
+           END IF
+
+           ConvectionFlag = GetString( Equation, 'Convection', Found )
+
+           Material => GetMaterial()
+           IF (.NOT.ASSOCIATED(Material)) THEN
+              WRITE (Message,'(A,I3)') 'No Material found for boundary element no. ', t
+              CALL FATAL("FabricSolveSpectral",Message)
+           ELSE
+              material_id = GetMaterialId( CurrentElement, Found)
+              IF(.NOT.Found) THEN
+                 WRITE (Message,'(A,I3)') 'No Material ID found for boundary element no. ', t
+                 CALL FATAL("FabricSolveSpectral",Message)
+              END IF
+           END IF
+        END IF
+
+        Equation => GetEquation()
+        SELECT CASE( GetString(Equation, 'Convection', Found ) )
+
+           !-----------------
+        CASE( 'computed' )
+           !-----------------
+
+           FlowSolName =  GetString( Equation,'Flow Solution Name', FlowSolutionFound)
+           IF(.NOT.FlowSolutionFound) THEN        
+              CALL WARN('FabricSolver','Keyword >Flow Solution Name< not found in section >Equation<')
+              CALL WARN('FabricSolver','Taking default value >Flow Solution<')
+              WRITE(FlowSolName,'(A)') 'AIFlow'
+           END IF
+
+
+           FlowVariable => VariableGet( Solver % Mesh % Variables, FlowSolName )
+           IF ( ASSOCIATED( FlowVariable ) ) THEN
+              FlowPerm     => FlowVariable % Perm
+              FlowValues => FlowVariable % Values
+              FlowSolutionFound = .TRUE.
+           ELSE
+              CALL INFO('FabricSolver','No Flow Solution associated',Level=1)
+              FlowSolutionFound = .FALSE.
+           END IF
+        CASE( "none")
+           FlowSolutionFound = .FALSE.
+        END SELECT
 !------------------------------------------------------------------------------
 !        Get element local stiffness & mass matrices
 !------------------------------------------------------------------------------
@@ -1276,34 +1329,6 @@ CONTAINS
 !------------------------------------------------------------------------------
        END SUBROUTINE LocalMatrix
 !------------------------------------------------------------------------------
-
-!------------------------------------------------------------------------------
-      SUBROUTINE FindParentUVW( Edge, nEdge, Parent, nParent, U, V, W, Basis )
-!------------------------------------------------------------------------------
-        IMPLICIT NONE
-        TYPE(Element_t), POINTER :: Edge, Parent
-        INTEGER :: nEdge, nParent
-        REAL( KIND=dp ) :: U, V, W, Basis(:)
-        !------------------------------------------------------------------------------
-        INTEGER :: i, j
-        REAL(KIND=dp) :: NodalParentU(nEdge),NodalParentV(nEdge),NodalParentW(nEdge)
-        !------------------------------------------------------------------------------
-        DO i = 1,nEdge
-        DO j = 1,nParent
-          IF ( Edge % NodeIndexes(i) == Parent % NodeIndexes(j) ) THEN
-            NodalParentU(i) = Parent % Type % NodeU(j)
-            NodalParentV(i) = Parent % Type % NodeV(j)
-            NodalParentW(i) = Parent % Type % NodeW(j)
-            EXIT
-          END IF
-        END DO
-        END DO
-        U = SUM( Basis(1:nEdge) * NodalParentU(1:nEdge) )
-        V = SUM( Basis(1:nEdge) * NodalParentV(1:nEdge) )
-        W = SUM( Basis(1:nEdge) * NodalParentW(1:nEdge) )
-!------------------------------------------------------------------------------      
-      END SUBROUTINE FindParentUVW
-!------------------------------------------------------------------------------      
 
 
 !------------------------------------------------------------------------------

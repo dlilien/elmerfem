@@ -70,8 +70,9 @@
      TYPE(Solver_t), POINTER :: PSolver
 
      TYPE(Matrix_t),POINTER :: StiffMatrix
+     TYPE(ValueList_t), POINTER :: Equation
 
-     INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat,spoofdim
+     INTEGER :: dim,n1,n2,i,j,k,l,n,t,iter,NDeg,STDOFs,LocalNodes,istat,spoofdim,kbody
 
      TYPE(ValueList_t),POINTER :: Material, BC, SolverParams
      TYPE(Nodes_t) :: ElementNodes
@@ -104,17 +105,18 @@
      REAL(KIND=dp) :: a2(6)
      REAL(KIND=dp) :: ai(3), Angle(3)
 
-     LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE.
+     LOGICAL :: GotForceBC,GotIt,NewtonLinearization = .FALSE.,UnFoundFatal=.TRUE., Found
      LOGICAL :: OOPlaneRot13
      LOGICAL :: OOPlaneRot23
 
-     INTEGER :: body_id,bf_id,eq_id, comp, Indexes(128)
+     CHARACTER(LEN=MAX_NAME_LEN) :: FlowSolName, ConvectionFlag,SolverName='FabricSolver'
+     INTEGER :: body_id,bf_id,eq_id, comp, Indexes(128),material_id,NSDOFs
 !
      INTEGER :: old_body = -1
 
      REAL(KIND=dp) :: FabricGrid(4879)                   
                         
-     LOGICAL :: AllocationsDone = .FALSE., FreeSurface
+     LOGICAL :: AllocationsDone = .FALSE., FreeSurface, FlowSolutionFound
 
      TYPE(Variable_t), POINTER :: TimeVar
 
@@ -211,12 +213,7 @@
       END IF
       WRITE(Message,'(A,A)') 'OOPlane13 variable = ', OOPlaneRotVar13
       CALL INFO('FabricSolve', Message , level = 20)
-      FlowVariable => VariableGet( Solver % Mesh % Variables, 'AIFlow' )
-      IF ( ASSOCIATED( FlowVariable ) ) THEN
-       FlowPerm    => FlowVariable % Perm
-       FlowValues  => FlowVariable % Values
-      END IF
-      
+     
 !!!!! Mesh Velo
      MeshVeloVariable => VariableGet( Solver % Mesh % Variables, &
             'Mesh Velocity' )
@@ -382,6 +379,65 @@
          
          Material => GetMaterial()
          body_id = CurrentElement % BodyId
+
+
+        ! cycle halo elements
+        !-------------------
+        IF (ParEnv % myPe .NE. CurrentElement % partIndex) CYCLE
+
+
+        IF (.NOT.ASSOCIATED(CurrentElement)) CYCLE
+        IF ( CurrentElement % BodyId /= body_id ) THEN
+           Equation => GetEquation()
+           IF (.NOT.ASSOCIATED(Equation)) THEN
+              WRITE (Message,'(A,I3)') 'No Equation  found for boundary element no. ', t
+              CALL FATAL(SolverName,Message)
+           END IF
+
+           ConvectionFlag = GetString( Equation, 'Convection', Found )
+
+           Material => GetMaterial()
+           IF (.NOT.ASSOCIATED(Material)) THEN
+              WRITE (Message,'(A,I3)') 'No Material found for boundary element no. ', t
+              CALL FATAL(SolverName,Message)
+           ELSE
+              material_id = GetMaterialId( CurrentElement, Found)
+              IF(.NOT.Found) THEN
+                 WRITE (Message,'(A,I3)') 'No Material ID found for boundary element no. ', t
+                 CALL FATAL(SolverName,Message)
+              END IF
+           END IF
+        END IF
+
+        Equation => GetEquation()
+        SELECT CASE( GetString(Equation, 'Convection', Found ) )
+
+           !-----------------
+        CASE( 'computed' )
+           !-----------------
+
+           FlowSolName =  GetString( Equation,'Flow Solution Name', FlowSolutionFound)
+           IF(.NOT.FlowSolutionFound) THEN        
+              CALL WARN('FabricSolver','Keyword >Flow Solution Name< not found in section >Equation<')
+              CALL WARN('FabricSolver','Taking default value >Flow Solution<')
+              WRITE(FlowSolName,'(A)') 'Flow Solution'
+           END IF
+
+
+           FlowVariable => VariableGet( Solver % Mesh % Variables, FlowSolName )
+           IF ( ASSOCIATED( FlowVariable ) ) THEN
+              FlowPerm     => FlowVariable % Perm
+              FlowValues => FlowVariable % Values
+              NSDOFs       =  FlowVariable % DOFs
+              FlowSolutionFound = .TRUE.
+           ELSE
+              CALL INFO('FabricSolver','No Flow Solution associated',Level=1)
+              FlowSolutionFound = .FALSE.
+           END IF
+        CASE( "none")
+           FlowSolutionFound = .FALSE.
+        END SELECT
+ 
 !------------------------------------------------------------------------------
 !        Read in material constants from Material section
 !------------------------------------------------------------------------------
@@ -1193,35 +1249,6 @@ CONTAINS
 !------------------------------------------------------------------------------
        END SUBROUTINE LocalMatrix
 !------------------------------------------------------------------------------
-
-!------------------------------------------------------------------------------
-    SUBROUTINE FindParentUVW( Edge, nEdge, Parent, nParent, U, V, W, Basis )
-!------------------------------------------------------------------------------
-      IMPLICIT NONE
-      TYPE(Element_t), POINTER :: Edge, Parent
-      INTEGER :: nEdge, nParent
-      REAL( KIND=dp ) :: U, V, W, Basis(:)
-!------------------------------------------------------------------------------
-      INTEGER :: i, j,l
-      REAL(KIND=dp) :: NodalParentU(nEdge),NodalParentV(nEdge),NodalParentW(nEdge)
-!------------------------------------------------------------------------------
-      DO i = 1,nEdge
-        DO j = 1,nParent
-          IF ( Edge % NodeIndexes(i) == Parent % NodeIndexes(j) ) THEN
-            NodalParentU(i) = Parent % Type % NodeU(j)
-            NodalParentV(i) = Parent % Type % NodeV(j)
-            NodalParentW(i) = Parent % Type % NodeW(j)
-            EXIT
-          END IF
-        END DO
-      END DO
-      U = SUM( Basis(1:nEdge) * NodalParentU(1:nEdge) )
-      V = SUM( Basis(1:nEdge) * NodalParentV(1:nEdge) )
-      W = SUM( Basis(1:nEdge) * NodalParentW(1:nEdge) )
-!------------------------------------------------------------------------------      
-    END SUBROUTINE FindParentUVW
-!------------------------------------------------------------------------------      
-
 
 !------------------------------------------------------------------------------
     SUBROUTINE LocalJumps( STIFF,Edge,n,LeftParent,n1,RightParent,n2,Velo,MeshVelo )

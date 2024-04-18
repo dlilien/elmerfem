@@ -19,7 +19,7 @@ End
 
 Simulation
   Max Output Level = 7
-  Coordinate System = "Cartesian" !Axi Symmetric"  ! axi symmetric is not a metric, it is just a parameter
+  Coordinate System = ""Axi Symmetric"  ! axi symmetric is not a metric, it is just a parameter
   Simulation Type = Steady State
   Steady State Max Iterations = 1
 
@@ -120,6 +120,6 @@ Boundary Condition 2
 End
 
 
-Solver 1 :: Reference Norm = 1.14936186E+00
+Solver 1 :: Reference Norm = 1.08936567E+00
 Solver 3 :: Reference Norm = 2.19074074E+02
 

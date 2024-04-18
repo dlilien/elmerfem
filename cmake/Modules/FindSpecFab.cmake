@@ -14,6 +14,7 @@ INCLUDE(${CMAKE_ROOT}/Modules/FindPackageHandleStandardArgs.cmake)
  
 FIND_LIBRARY(SpecFab_LIBRARY specfab HINTS
   "${SpecFabROOT}"
+  "${SpecFabROOT}/lib"
   "${SpecFabLIB}"
   "$ENV{SpecFabROOT}"
   "$ENV{SpecFabLIB}"
@@ -26,6 +27,7 @@ FIND_PATH(SpecFab_INCLUDE_DIR
   specfab.mod 
   HINTS 
   "${SpecFabROOT}"
+  "${SpecFabROOT}/include"
   "${SpecFabINCLUDE}"
   "$ENV{SpecFabROOT}"
   "$ENV{SPECFAB_INCLUDE_DIR}"

@@ -69,7 +69,7 @@ Material 1
 !!!~~~ For the Porous solver~~~~~~
   Powerlaw Exponent = Real 3.0 
   Min Second Invariant = Real 1.0E-20
-  Fluidity Parameter = Real 20.0  MPa^{-3}a^{-1} 
+  Fluidity Parameter = Real 20.0  ! MPa^{-3}a^{-1} 
 
 !!!~~~ For the AdvReact solver~~~~~~
 !! Relative density must stay < 1
@@ -182,5 +182,5 @@ Boundary Condition 3
    Porous 1 = Real 0.0
 End
 
-Solver 2 :: Reference Norm = Real 0.921524588
+Solver 2 :: Reference Norm = Real 0.919542625
 Solver 2 :: Reference Norm Tolerance = Real 1E-04
