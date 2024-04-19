@@ -385,15 +385,6 @@
          IF (body_id /= old_body) Then 
            old_body = body_id
            CALL GetMaterialDefs()
-         END IF
-         LocalFluidity(1:n) = ListGetReal( Material, &
-                         'Fluidity Parameter', n, NodeIndexes, GotIt,&
-                         UnFoundFatal=UnFoundFatal)
-
-        ! cycle halo elements
-        !-------------------
-        IF (ParEnv % myPe .NE. CurrentElement % partIndex) CYCLE
-
 
         IF (.NOT.ASSOCIATED(CurrentElement)) CYCLE
         IF ( CurrentElement % BodyId /= body_id ) THEN
@@ -445,6 +436,17 @@
         CASE( "none")
            FlowSolutionFound = .FALSE.
         END SELECT
+         END IF
+         LocalFluidity(1:n) = ListGetReal( Material, &
+                         'Fluidity Parameter', n, NodeIndexes, GotIt,&
+                         UnFoundFatal=UnFoundFatal)
+
+        ! cycle halo elements
+        !-------------------
+        ! IF (ParEnv % myPe .NE. CurrentElement % partIndex) CYCLE
+
+
+
 !------------------------------------------------------------------------------
 !        Get element local stiffness & mass matrices
 !------------------------------------------------------------------------------
@@ -463,11 +465,14 @@
          END DO
 
          ! Two variables needed for velocity
-         k = FlowVariable % DOFs
          Velocity = 0.0d0
+         IF (ASSOCIATED(FlowVariable)) Then
+         k = FlowVariable % DOFs
          DO i=1,k-1
             Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
          END DO
+         ENDIF
+
          MeshVelocity=0._dp
          IF (ASSOCIATED(MeshVeloVariable)) Then
            k = MeshVeloVariable % DOFs
@@ -484,17 +489,28 @@
         END IF
        IF (spoofdim.gt.dim) THEN
          CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
-                       LocalTemperature, Velocity, CurrentElement, n, ElementNodes, &
-                       Wn, rho, lambdanaught, gammanaught, LocalOOP23, LocalOOP13)
+                       LocalTemperature, Velocity, &
+                       CurrentElement, n, ElementNodes, rho, &
+                       Wn(14:15), Wn(16), INT(Wn(17)),&
+                       lambdanaught, Wn(10), Wn(11),&
+                       gammanaught, Wn(8), Wn(12), Wn(18) > 0.5,&
+                       wn(9), Wn(2),&
+                       LocalOOP23, LocalOOP13)
        ELSE
          CALL FabGrad( LocalGrad, LocalLHS, fab_len / 2, LocalFabric, &
                        LocalTemperature, Velocity, &
-                       CurrentElement, n, ElementNodes, &
-                       Wn, rho, lambdanaught, gammanaught)
+                       CurrentElement, n, ElementNodes, rho, &
+                       Wn(14:15), Wn(16), INT(Wn(17)),&
+                       lambdanaught, Wn(10), Wn(11),&
+                       gammanaught, Wn(8), Wn(12), Wn(18) > 0.5,&
+                       wn(9), Wn(2))
        END IF
          ElGradVals(t, :, :) = LocalGrad(:, :)
          ElLHSVals(t, :, :) = LocalGrad(:, :)
        END DO  ! active elements
+
+       WRITE(Message,'(A)') 'Finished loop over active elements'
+       CALL INFO('FabricSolveSpectral', Message, Level = 20)
  
        
        outer: DO COMP=1,fab_len
@@ -1016,18 +1032,21 @@ CONTAINS
 !------------------------------------------------------------------------------
       SUBROUTINE FabGrad( Gradient, LHS, nlm_len, NodalFabric, &
                           NodalTemperature, NodalVelo, &
-                          Element, n, Nodes, Wn, rho, &
-                          lambdanaught,gammanaught,LocalOOP23,LocalOOP13)
+                          Element, n, Nodes, rho, Eij_grain, alpha_rheo, n_grain, &
+                          lambdanaught, lambda_slope, lambda_max,&
+                          gammanaught,gamma_exp,gamma_max,stress_recryst,&
+                          iota,glen_n,&
+                          LocalOOP23,LocalOOP13)
 !------------------------------------------------------------------------------
      INTEGER :: nlm_len
-     REAL(KIND=dp) :: NodalVelo(:,:),NodalFabric(:,:)
-     REAL(KIND=dp), DIMENSION(:) :: NodalTemperature
-     REAL(KIND=dp), DIMENSION(:), OPTIONAL :: LocalOOP23, LocalOOP13
-     REAL(KIND=dp), Intent(OUT) :: Gradient(:,:), LHS(:,:)
 
      TYPE(Nodes_t) :: Nodes
      TYPE(Element_t) :: Element
      INTEGER :: n
+     REAL(KIND=dp) :: NodalVelo(4,N),NodalFabric(nlm_len * 2,N)
+     REAL(KIND=dp), Intent(OUT) :: Gradient(nlm_len * 2,N), LHS(nlm_len * 2,N)
+     REAL(KIND=dp) :: NodalTemperature(N)
+     REAL(KIND=dp), OPTIONAL :: LocalOOP23(N), LocalOOP13(N)
 !------------------------------------------------------------------------------
 !
      REAL(KIND=dp) :: Basis(2*n),ddBasisddx(1,1,1)
@@ -1037,10 +1056,12 @@ CONTAINS
      REAL(KIND=dp) :: rho
      REAL(KIND=dp) :: lambdanaught, gammanaught, lambda, gammav, EpsEff
 
-     INTEGER :: i,j,t,dim,NBasis,spoofdim
+     INTEGER :: i,j,t,dim,NBasis,spoofdim,n_grain
 
      REAL(KIND=dp) :: s,u,v,w
-     REAL(KIND=dp) :: Wn(:),SD(6)
+     REAL(KIND=dp) :: SD(6)
+     REAL(KIND=dp) :: Eij_grain(2), alpha_rheo, lambda_slope, gamma_exp, lambda_max, gamma_max,iota,glen_n
+     LOGICAL :: stress_recryst
 
      REAL(KIND=dp) :: LGrad(3,3),StrainRate(3,3),epsi,SR(3,3)
      REAL(KIND=dp) :: Spin1(3,3),Stress(3,3),eps(3,3)
@@ -1058,8 +1079,6 @@ CONTAINS
 
      ! For new orthotropic law
      REAL(KIND=dp) :: e1(3), e2(3), e3(3), eigvals(3), Eij(6)
-
-
       INTERFACE
         FUNCTION BGlenT( Tc, W)
            USE Types
@@ -1150,7 +1169,7 @@ CONTAINS
 
       ! Bulk enhancement factors w.r.t. ei--ej (assumes the fabric
       ! symmetry/reflection axes = eigen directions).
-      Eij = Eij_tranisotropic(fabric, e1,e2,e3, Wn(14:15), Wn(16), INT(Wn(17)))
+      Eij = Eij_tranisotropic(fabric, e1,e2,e3, Eij_grain, alpha_rheo, n_grain)
 
       ! A_specfab = 2.0_dp**((Wn(2)-1.0_dp)/2.0_dp)
       ! Inverse rheology
@@ -1163,7 +1182,7 @@ CONTAINS
       do i = 1,3
             SR(i,i) = SR(i,i) / 2.0_dp
       end do
-      Stress = rheo_rev_orthotropic_dimless(SR, Wn(2), e1,e2,e3, Eij)
+      Stress = rheo_rev_orthotropic_dimless(SR, Glen_n, e1,e2,e3, Eij)
       do i = 1,3
         do j = 1,3
             if (i.ne.j) then
@@ -1199,11 +1218,11 @@ CONTAINS
                     + StrainRate(2,3) * StrainRate(2,3))
 
       ! simplest to do this in celcius
-      lambda = MAX(MIN((lambdanaught + Temperature * Wn(10)) * EpsEff, Wn(11)), 0.0_dp)
+      lambda = MAX(MIN((lambdanaught + Temperature * lambda_slope) * EpsEff, lambda_max), 0.0_dp)
       ! Arrhenius relations are in Kelvin
-      gammav = MIN((gammanaught * EXP(-Wn(8) / (Temperature + 273.15))) * EpsEff, Wn(12))
+      gammav = MIN((gammanaught * EXP(-gamma_exp / (Temperature + 273.15))) * EpsEff, gamma_max)
 
-      IF (Wn(9).GT.0.0_dp) THEN
+      IF (iota.GT.0.0_dp) THEN
         dndt_ROT = M_LROT(EPS, Spin1, 1.0_dp, 0.0_dp)
         dndt_REG = M_REG(EPS)
       ELSE
@@ -1211,7 +1230,7 @@ CONTAINS
         dndt_REG = 0.0_dp
       END IF
       IF (gammav.GT.0.0_dp) THEN
-        IF (Wn(18).GT.0.5_dp) THEN
+        IF (stress_recryst) THEN
           dndt_DDRX = M_DDRX(Fabric, Stress)
         ELSE
           dndt_DDRX = M_DDRX(Fabric, StrainRate)
