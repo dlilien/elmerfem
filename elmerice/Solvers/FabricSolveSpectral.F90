@@ -181,8 +181,8 @@
       END IF
 
       IF (FabricSol % DOFs .NE. fab_len) THEN
-        WRITE(Message,'(A,A,A)') 'Fabric variable ', FabVarName,&
-                                 ' must have fab_len DoFs'
+        WRITE(Message,'(A,A,A,i4,A,i4)') 'Fabric variable ', FabVarName,&
+          ' must have ', fab_len, ' dofs but has ', FabricSol % DOFs
         CALL FATAL('FabricSolveSpectral', Message)
       END IF
 
@@ -363,7 +363,7 @@
        CALL Info( 'FabricSolveSpectral', ' ', Level=4 )
        CALL Info( 'FabricSolveSpectral', &
                     '-------------------------------------',Level=4 )
-       WRITE( Message, * ) 'Fabric solver  iteration', iter
+       WRITE( Message, * ) 'Spectral Fabric solver iteration', iter
        CALL Info( 'FabricSolveSpectral', Message,Level=4 )
        CALL Info( 'FabricSolveSpectral', &
                      '-------------------------------------',Level=4 )
@@ -384,10 +384,9 @@
          body_id = CurrentElement % BodyId
          IF (body_id /= old_body) Then 
            old_body = body_id
-           CALL GetMaterialDefs()
+           CALL GetFabricMaterialDefs()
 
         IF (.NOT.ASSOCIATED(CurrentElement)) CYCLE
-        IF ( CurrentElement % BodyId /= body_id ) THEN
            Equation => GetEquation()
            IF (.NOT.ASSOCIATED(Equation)) THEN
               WRITE (Message,'(A,I3)') 'No Equation  found for boundary element no. ', t
@@ -410,12 +409,6 @@
         END IF
 
         Equation => GetEquation()
-        SELECT CASE( GetString(Equation, 'Convection', Found ) )
-
-           !-----------------
-        CASE( 'computed' )
-           !-----------------
-
            FlowSolName =  GetString( Equation,'Flow Solution Name', FlowSolutionFound)
            IF(.NOT.FlowSolutionFound) THEN        
               CALL WARN('FabricSolver','Keyword >Flow Solution Name< not found in section >Equation<')
@@ -430,13 +423,9 @@
               FlowValues => FlowVariable % Values
               FlowSolutionFound = .TRUE.
            ELSE
-              CALL INFO('FabricSolver','No Flow Solution associated',Level=1)
-              FlowSolutionFound = .FALSE.
+              CALL FATAL('SpectralFabricSolver','No Flow Solution associated')
            END IF
-        CASE( "none")
-           FlowSolutionFound = .FALSE.
-        END SELECT
-         END IF
+
          LocalFluidity(1:n) = ListGetReal( Material, &
                          'Fluidity Parameter', n, NodeIndexes, GotIt,&
                          UnFoundFatal=UnFoundFatal)
@@ -578,7 +567,7 @@
 !------------------------------------------------------------------------------
          IF (body_id /= old_body) Then 
            old_body = body_id
-           CALL GetMaterialDefs()
+           CALL GetFabricMaterialDefs()
          END IF
       
          LocalFluidity(1:n) = ListGetReal( Material, &
@@ -902,7 +891,7 @@
 CONTAINS
 
 !------------------------------------------------------------------------------
-      SUBROUTINE GetMaterialDefs()
+      SUBROUTINE GetFabricMaterialDefs()
 
        rho = ListGetConstReal(Material, 'Interaction Parameter', GotIt )
        IF (.NOT.GotIt) THEN
@@ -957,6 +946,8 @@ CONTAINS
         WRITE(Message,'(A,F10.4)') 'Migration Gamma = ',   Wn(8)
         CALL INFO('FabricSolveSpectral', Message, Level = 20)
       END IF
+      WRITE(Message,'(A,F10.4)') 'Migration A = ',   Wn(8)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(9) = ListGetConstReal( Material, 'Lattice Rotation', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
@@ -968,6 +959,8 @@ CONTAINS
         WRITE(Message,'(A,F10.4)') 'Lattice Rotation = ',   Wn(9)
         CALL INFO('FabricSolveSpectral', Message, Level = 20)
       END IF
+      WRITE(Message,'(A,F10.4)') 'Lat Rot = ',   Wn(9)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(10) = ListGetConstReal( Material, 'Diffusion Temp Dependence', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
@@ -976,41 +969,57 @@ CONTAINS
             'Diffusion temp dependence unfound, assumed zero'
         CALL INFO('FabricSolveSpectral', Message, Level = 3)
       END IF
+      WRITE(Message,'(A,F10.4)') 'Lamda slope = ',   Wn(10)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(11) = ListGetConstReal( Material, 'Max Diffusion', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(11) = 1.0e8_dp
       END IF
+      WRITE(Message,'(A,F10.4)') 'Lamda max = ',   Wn(11)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(12) = ListGetConstReal( Material, 'Max Migration', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(12) = 1.0e8_dp
       END IF
+      WRITE(Message,'(A,F10.4)') 'Gamma max = ',   Wn(12)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(13) = ListGetConstReal( Material, 'Spatial Fabric Diffusion', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(13) = 5.0e-5_dp
       END IF
+      WRITE(Message,'(A,F10.4)') 'Spatial fab. diff. = ',   Wn(13)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(14) = ListGetConstReal( Material, 'Ecc', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(14) = 1.0d0
       END IF
+      WRITE(Message,'(A,F10.4)') 'Ecc = ',   Wn(14)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(15) = ListGetConstReal( Material, 'Eca', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(15) = 1.0d3
       END IF
+      WRITE(Message,'(A,F10.4)') 'Eca = ',   Wn(15)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(16) = ListGetConstReal( Material, 'Rheology alpha', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(16) = 0.0125
       END IF
+      WRITE(Message,'(A,F10.4)') 'Alpha_rheo = ',   Wn(16)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(17) = ListGetInteger( Material, 'Grain exponent', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
         Wn(17) = 1
       END IF
+      WRITE(Message,'(A,F3.1)') 'n_grain = ',   Wn(17)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       Wn(18) = ListGetInteger( Material, 'Stress Recryst', GotIt,UnFoundFatal=.FALSE.)
       IF (.NOT.GotIt) THEN
@@ -1019,13 +1028,15 @@ CONTAINS
         CALL INFO('FabricSolveSpectral', Message, Level = 3)
         Wn(18) = 1
       END IF
+      WRITE(Message,'(A,F3.1)') 'Stress recryst = ',   Wn(18)
+      CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
       gammanaught = ListGetConstReal( Material, 'Migration Prefactor',GotIt,UnFoundFatal=.TRUE.)
       WRITE(Message,'(A,F10.4)') 'Migration prefactor = ', gammanaught
       CALL INFO('FabricSolveSpectral', Message, Level = 20)
 
 !------------------------------------------------------------------------------
-      END SUBROUTINE GetMaterialDefs
+      END SUBROUTINE GetFabricMaterialDefs
 !------------------------------------------------------------------------------
 
 
@@ -1068,8 +1079,9 @@ CONTAINS
 
      COMPLEX(KIND=dp) :: Fabric(nlm_len), NodalGradient(nlm_len)
      COMPLEX(KIND=dp) :: dndt(nlm_len, nlm_len), dndt_ROT(nlm_len, nlm_len),&
-                         dndt_DDRX(nlm_len, nlm_len), dndt_CDRX(nlm_len,nlm_len),&
-                         dndt_REG(nlm_len, nlm_len)
+                         dndt_DDRX(nlm_len, nlm_len)
+     REAL(KIND=dp) :: dndt_CDRX(nlm_len,nlm_len),&
+                      dndt_REG(nlm_len, nlm_len)
      Integer :: INDi(6),INDj(6)
      INTEGER :: N_Integ
      REAL(KIND=dp), DIMENSION(:), POINTER :: U_Integ,V_Integ,W_Integ,S_Integ
@@ -1244,7 +1256,7 @@ CONTAINS
         dndt_CDRX = 0.0_dp
       END IF
 
-      dndt = gammav * dndt_DDRX + lambda * dndt_CDRX + Wn(9) * dndt_ROT + dndt_REG
+      dndt = gammav * dndt_DDRX + lambda * dndt_CDRX + iota * dndt_ROT + dndt_REG
       NodalGradient = MATMUL(dndt, Fabric)
       DO i=1,nlm_len
         Gradient(i, t) = REAL(NodalGradient(i)) ! - REAL(dndt(i, i) * Fabric(i))
