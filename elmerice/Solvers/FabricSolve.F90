@@ -155,7 +155,7 @@
 !------------------------------------------------------------------------------
 !  Read constants from constants section of SIF file
 !------------------------------------------------------------------------------
-         
+
       Wn(7) = ListGetConstReal( Model % Constants, 'Gas Constant', GotIt,UnFoundFatal=UnFoundFatal )
       !Previous default value: Wn(7) = 8.314
       WRITE(Message,'(A,F10.4)')'Gas Constant =',Wn(7)
@@ -385,7 +385,6 @@
         !-------------------
         IF (ParEnv % myPe .NE. CurrentElement % partIndex) CYCLE
 
-
         IF (.NOT.ASSOCIATED(CurrentElement)) CYCLE
         IF ( CurrentElement % BodyId /= body_id ) THEN
            Equation => GetEquation()
@@ -420,7 +419,7 @@
            IF(.NOT.FlowSolutionFound) THEN        
               CALL WARN('FabricSolver','Keyword >Flow Solution Name< not found in section >Equation<')
               CALL WARN('FabricSolver','Taking default value >Flow Solution<')
-              WRITE(FlowSolName,'(A)') 'Flow Solution'
+              WRITE(FlowSolName,'(A)') 'AIFlow'
            END IF
 
 
@@ -471,9 +470,11 @@
 
          k = FlowVariable % DOFs
          Velocity = 0.0d0
-         DO i=1,k-1
-            Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
-         END DO
+         IF (FlowSolutionFound) THEN
+           DO i=1,k-1
+              Velocity(i,1:n) = FlowValues(k*(FlowPerm(NodeIndexes)-1)+i)
+           END DO
+         END IF
 
 !------------meshvelocity
          MeshVelocity=0._dp

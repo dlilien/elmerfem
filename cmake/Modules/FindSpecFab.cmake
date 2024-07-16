@@ -40,6 +40,7 @@ IF (SpecFab_LIBRARY AND SpecFab_INCLUDE_DIR)
   SET(SpecFabLIB_FOUND TRUE)
   SET(SpecFab_INCLUDE "${SpecFab_INCLUDE_DIR}")
   SET(SpecFab_LIBRARIES "${SpecFab_LIBRARY}")
+  GET_FILENAME_COMPONENT(SpecFab_LIBDIR ${SpecFab_LIBRARY} DIRECTORY)
   SET(SpecFab_INCLUDE_FOUND TRUE)
 ELSE()
   SET(SpecFab_FAILMSG "SpecFab libraries not found.")
@@ -51,6 +52,7 @@ ENDIF()
 
 MARK_AS_ADVANCED(
   SpecFabLIB
+  SpecFab_LIBDIR
   SpecFab_FAILMSG
   SpecFab_LIBRARIES
   SpecFab_INCLUDE
